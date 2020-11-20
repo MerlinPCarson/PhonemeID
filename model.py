@@ -19,11 +19,17 @@ class SimpleCNN(nn.Module):
         # create module list
         self.layers = []
         self.layers.append(nn.Conv1d(in_channels=num_channels, 
+                                     out_channels=num_filters//2, kernel_size=kernel_size, bias=True))
+        self.layers.append(nn.BatchNorm1d(num_filters//2))
+        self.layers.append(nn.ReLU(inplace=True))
+        self.layers.append(nn.Conv1d(in_channels=num_filters//2, 
                                      out_channels=num_filters, kernel_size=kernel_size, bias=True))
         self.layers.append(nn.BatchNorm1d(num_filters))
-        self.layers.append(nn.ReLU(inplace=True))
+        self.layers.append(nn.Conv1d(in_channels=num_filters, 
+                                     out_channels=num_filters*2, kernel_size=kernel_size, bias=True))
+        self.layers.append(nn.BatchNorm1d(num_filters*2))
         self.layers.append(nn.Flatten())
-        self.layers.append(nn.Linear(9*num_filters, num_phns))
+        self.layers.append(nn.Linear(5*num_filters*2, num_phns))
 
         self.model = nn.ModuleList(self.layers)
         init_weights(self.model)
