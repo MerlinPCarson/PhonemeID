@@ -33,10 +33,11 @@ def parse_args():
 
     parser.add_argument('--model_dir', type=str, default='models', help='location of model files')
     parser.add_argument('--seed', type=int, default=42, help='random seed')
-    parser.add_argument('--batch_size', type=int, default=64, help='batch size for training')
+    parser.add_argument('--batch_size', type=int, default=16, help='batch size for training')
     parser.add_argument('--epochs', type=int, default=1000, help='number of epochs')
-    parser.add_argument('--patience', type=int, default=20, help='number of epochs of no improvment before early stopping')
+    parser.add_argument('--patience', type=int, default=10, help='number of epochs of no improvment before early stopping')
     parser.add_argument('--lr', type=float, default=0.01, help='learning rate')
+    parser.add_argument('--num_filters', type=int, default=32, help='base number of filters for CNN layers')
 
     return parser.parse_args()
 
@@ -104,7 +105,7 @@ def main(args):
     val_loader = DataLoader(dataset=val_dataset, num_workers=os.cpu_count(), batch_size=args.batch_size, shuffle=False)
 
     # create model
-    model = SimpleCNN(num_channels, timit_dict.nphonemes)
+    model = SimpleCNN(num_channels, timit_dict.nphonemes, num_filters=args.num_filters)
 
     # prepare model for data parallelism (use multiple GPUs)
     #model = torch.nn.DataParallel(model, device_ids=device_ids).cuda()
@@ -112,28 +113,31 @@ def main(args):
 
     # setup loss and optimizer
     criterion = torch.nn.CrossEntropyLoss()#.cuda()
+    #criterion = torch.nn.NLLLoss()#.cuda()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
+    # schedulers
+    scheduler = ReduceLROnPlateau(optimizer, 'min', verbose=True, patience=args.patience//2)
+
     # data struct to track training and validation losses per epoch
-    model_params = {'train_mean': train_mean, 'train_std': train_std}
+    model_params = {'num_filters': args.num_filters, 'train_mean': train_mean, 'train_std': train_std}
 
     # save model parameters
-    history = {'model': model_params, 'train':[], 'val':[]}
+    history = {'model': model_params, 'loss':[], 'val_loss':[], 'val_acc':[]}
     pickle.dump(history, open(os.path.join(args.model_dir, 'model.npy'), 'wb'))
 
-#    # schedulers
-    scheduler = ReduceLROnPlateau(optimizer, 'max', verbose=True, patience=args.patience//2)
-
     # intializiang best values for regularization via early stopping 
-    best_val_loss = 99999
+    best_val_loss = 99999.0
+    best_val_acc = 0.0
     epochs_since_improvement = 0
 
     # Main training loop
-    for epoch in range(args.epochs):
-        print(f'Starting epoch {epoch+1}/{args.epochs} with learning rate {optimizer.param_groups[0]["lr"]}')
+    for epoch in range(1, args.epochs+1):
+        print(f'Starting epoch {epoch}/{args.epochs} with learning rate {optimizer.param_groups[0]["lr"]}')
 
-        epoch_train_loss = 0
-        epoch_val_loss = 0
+        epoch_train_loss = 0.0
+        epoch_val_loss = 0.0
+        epoch_val_acc = 0.0
 
         model.train()
         # iterate through batches of training examples
@@ -170,9 +174,16 @@ def main(args):
                 val_loss = criterion(preds, phns)
                 epoch_val_loss += val_loss.item()
 
+                # running average of accuracy
+                preds = torch.nn.functional.softmax(preds, dim=1)
+                _, top_class = preds.topk(k=1, dim=1)
+                equals = top_class == phns.view(top_class.shape)
+                epoch_val_acc += torch.mean(equals.type(torch.float))
+
         # epoch summary
         epoch_train_loss /= len(train_loader) 
         epoch_val_loss /= len(val_loader) 
+        epoch_val_acc /= len(val_loader)
 
         # reduce learning rate if validation has leveled off
         scheduler.step(epoch_val_loss)
@@ -181,15 +192,19 @@ def main(args):
 #        scheduler.step()
 
         # save epoch stats
-        history['train'].append(epoch_train_loss)
-        history['val'].append(epoch_val_loss)
+        history['loss'].append(epoch_train_loss)
+        history['val_loss'].append(epoch_val_loss)
+        history['val_acc'].append(epoch_val_acc)
         print(f'Training loss: {epoch_train_loss}')
         print(f'Validation loss: {epoch_val_loss}')
+        print(f'Eval accuracy: {epoch_val_acc}')
 
-        # save if best model
+        # save if best model, reset patience counter
         if epoch_val_loss < best_val_loss:
             print('Saving best model')
             best_val_loss = epoch_val_loss
+            best_val_acc = epoch_val_acc
+            best_epoch = epoch
             epochs_since_improvement = 0
             torch.save(model.state_dict(), os.path.join(args.model_dir, 'best_model.pt'))
             pickle.dump(history, open(os.path.join(args.model_dir, 'best_model.npy'), 'wb'))
@@ -204,6 +219,11 @@ def main(args):
     print('Saving final model')
     torch.save(model.state_dict(), os.path.join(args.model_dir, 'final_model.pt'))
     pickle.dump(history, open(os.path.join(args.model_dir, 'final_model.npy'), 'wb'))
+
+    # report best stats
+    print(f'Best epoch: {best_epoch}')
+    print(f' val loss: {best_val_loss}')
+    print(f' val acc: {best_val_acc}')
 
     print(f'Script completed in {time.time()-start:.2f} secs')
     return 0

@@ -13,23 +13,30 @@ def init_weights(model):
 
 
 class SimpleCNN(nn.Module):
-    def __init__(self, num_channels, num_phns, num_layers=17, kernel_size=3, stride=1, num_filters=64):
+    def __init__(self, num_channels, num_phns, num_layers=17, kernel_size=3, stride=1, num_filters=16):
         super(SimpleCNN, self).__init__()
+
+        padding = int((kernel_size-stride)/2)
 
         # create module list
         self.layers = []
-        self.layers.append(nn.Conv1d(in_channels=num_channels, 
-                                     out_channels=num_filters//2, kernel_size=kernel_size, bias=True))
-        self.layers.append(nn.BatchNorm1d(num_filters//2))
-        self.layers.append(nn.ReLU(inplace=True))
-        self.layers.append(nn.Conv1d(in_channels=num_filters//2, 
-                                     out_channels=num_filters, kernel_size=kernel_size, bias=True))
-        self.layers.append(nn.BatchNorm1d(num_filters))
-        self.layers.append(nn.Conv1d(in_channels=num_filters, 
-                                     out_channels=num_filters*2, kernel_size=kernel_size, bias=True))
+        self.layers.append(nn.Conv1d(in_channels=num_channels, out_channels=num_filters*4, 
+                                     kernel_size=kernel_size, bias=True, padding=padding))
+        self.layers.append(nn.BatchNorm1d(num_filters*4))
+        self.layers.append(nn.PReLU())
+        self.layers.append(nn.Dropout(0.25))
+        self.layers.append(nn.Conv1d(in_channels=num_filters*4, out_channels=num_filters*2, 
+                                     kernel_size=kernel_size, bias=True, padding=padding))
         self.layers.append(nn.BatchNorm1d(num_filters*2))
+        self.layers.append(nn.PReLU())
+        self.layers.append(nn.Dropout(0.25))
+        self.layers.append(nn.Conv1d(in_channels=num_filters*2, out_channels=num_filters, 
+                                     kernel_size=kernel_size, bias=True, padding=padding))
+        self.layers.append(nn.BatchNorm1d(num_filters))
+        self.layers.append(nn.PReLU())
+        self.layers.append(nn.Dropout(0.25))
         self.layers.append(nn.Flatten())
-        self.layers.append(nn.Linear(5*num_filters*2, num_phns))
+        self.layers.append(nn.Linear(11*num_filters, num_phns))
 
         self.model = nn.ModuleList(self.layers)
         init_weights(self.model)
@@ -37,4 +44,4 @@ class SimpleCNN(nn.Module):
     def forward(self, x):
         for layer in self.model:
             x = layer(x)
-        return x 
+        return x
