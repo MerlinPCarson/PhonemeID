@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from torch.autograd import Variable
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
-from model import SimpleCNN
+from model import SimpleCNN, SimpleCNN2D
 
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
@@ -46,6 +46,12 @@ def setup_gpus():
     device_ids = [i for i in range(torch.cuda.device_count())]
     os.environ["CUDA_VISIBLE_DEVICES"] = ','.join(map(str, device_ids))
     return device_ids
+
+def preds_accuracy(preds, target):
+    preds = torch.nn.functional.softmax(preds, dim=1)
+    _, top_class = preds.topk(k=1, dim=1)
+    equals = top_class == target.view(top_class.shape)
+    return torch.mean(equals.type(torch.float))
 
 def main(args):
     start = time.time()
@@ -88,14 +94,16 @@ def main(args):
     # apply standardization parameters to training and validation sets
     x_train = (x_train-train_mean)/train_std
     x_val = (x_val-train_mean)/train_std
+    x_test = (timit_data.trainX-train_mean)/train_std
 
     # input shape for each example to network, NOTE: channels first
     num_channels, num_features = x_train.shape[1], x_train.shape[2]
     print(f'Input shape to model forward will be: ({args.batch_size}, {num_channels}, {num_features})')
 
     # load data for training
-    train_dataset = TensorDataset(torch.Tensor(x_train), torch.LongTensor(y_train))
-    val_dataset = TensorDataset(torch.Tensor(x_val), torch.LongTensor(y_val))
+    train_dataset = TensorDataset(torch.Tensor(x_train).unsqueeze(1), torch.LongTensor(y_train))
+    val_dataset = TensorDataset(torch.Tensor(x_val).unsqueeze(1), torch.LongTensor(y_val))
+    test_dataset = TensorDataset(torch.Tensor(x_test).unsqueeze(1), torch.LongTensor(timit_data.trainY))
 
     print(f'Number of training examples: {len(x_train)}')
     print(f'Number of validation examples: {len(x_val)}')
@@ -103,9 +111,10 @@ def main(args):
     # create batched data loaders for model
     train_loader = DataLoader(dataset=train_dataset, num_workers=os.cpu_count(), batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(dataset=val_dataset, num_workers=os.cpu_count(), batch_size=args.batch_size, shuffle=False)
+    test_loader = DataLoader(dataset=test_dataset, num_workers=os.cpu_count(), batch_size=args.batch_size, shuffle=False)
 
     # create model
-    model = SimpleCNN(num_channels, timit_dict.nphonemes, num_filters=args.num_filters)
+    model = SimpleCNN2D(num_channels, timit_dict.nphonemes, num_filters=args.num_filters)
 
     # prepare model for data parallelism (use multiple GPUs)
     #model = torch.nn.DataParallel(model, device_ids=device_ids).cuda()
@@ -123,7 +132,9 @@ def main(args):
     model_params = {'num_filters': args.num_filters, 'train_mean': train_mean, 'train_std': train_std}
 
     # save model parameters
-    history = {'model': model_params, 'loss':[], 'val_loss':[], 'val_acc':[]}
+    history = {'model': model_params, 'loss':[], 'acc': [], 
+                                      'val_loss':[], 'val_acc':[], 
+                                      'num_filters': args.num_filters}
     pickle.dump(history, open(os.path.join(args.model_dir, 'model.npy'), 'wb'))
 
     # intializiang best values for regularization via early stopping 
@@ -136,6 +147,7 @@ def main(args):
         print(f'Starting epoch {epoch}/{args.epochs} with learning rate {optimizer.param_groups[0]["lr"]}')
 
         epoch_train_loss = 0.0
+        epoch_train_acc = 0.0
         epoch_val_loss = 0.0
         epoch_val_acc = 0.0
 
@@ -149,6 +161,9 @@ def main(args):
 
             # make predictions
             preds = model(segs)
+
+            # running accuracy 
+            epoch_train_acc += preds_accuracy(preds, phns)
 
             # calculate loss
             loss = criterion(preds, phns)
@@ -169,19 +184,17 @@ def main(args):
 
                 # make predictions
                 preds = model(segs)
+                
+                # running accuracy 
+                epoch_val_acc += preds_accuracy(preds, phns)
 
                 # calculate loss
                 val_loss = criterion(preds, phns)
                 epoch_val_loss += val_loss.item()
 
-                # running average of accuracy
-                preds = torch.nn.functional.softmax(preds, dim=1)
-                _, top_class = preds.topk(k=1, dim=1)
-                equals = top_class == phns.view(top_class.shape)
-                epoch_val_acc += torch.mean(equals.type(torch.float))
-
         # epoch summary
         epoch_train_loss /= len(train_loader) 
+        epoch_train_acc /= len(train_loader)
         epoch_val_loss /= len(val_loader) 
         epoch_val_acc /= len(val_loader)
 
@@ -193,9 +206,11 @@ def main(args):
 
         # save epoch stats
         history['loss'].append(epoch_train_loss)
+        history['acc'].append(epoch_train_acc)
         history['val_loss'].append(epoch_val_loss)
         history['val_acc'].append(epoch_val_acc)
         print(f'Training loss: {epoch_train_loss}')
+        print(f'Training accuracy: {epoch_train_acc}')
         print(f'Validation loss: {epoch_val_loss}')
         print(f'Eval accuracy: {epoch_val_acc}')
 
@@ -221,9 +236,26 @@ def main(args):
     pickle.dump(history, open(os.path.join(args.model_dir, 'final_model.npy'), 'wb'))
 
     # report best stats
-    print(f'Best epoch: {best_epoch}')
-    print(f' val loss: {best_val_loss}')
-    print(f' val acc: {best_val_acc}')
+ #   print(f'Best epoch: {best_epoch}')
+ #   print(f' val loss: {best_val_loss}')
+ #   print(f' val acc: {best_val_acc}')
+
+    # test model
+    model.load_state_dict(torch.load(os.path.join(args.model_dir, 'best_model.pt')))
+    model.eval()
+    with torch.no_grad():
+        test_acc = 0.0
+        print('Testing')
+        for segs, phns in tqdm(test_loader):
+            preds = model(segs)
+            # running average of accuracy
+            preds = torch.nn.functional.softmax(preds, dim=1)
+            _, top_class = preds.topk(k=1, dim=1)
+            equals = top_class == phns.view(top_class.shape)
+            test_acc += torch.mean(equals.type(torch.float))
+
+    # average of running accuracy
+    print(f' test acc: {test_acc/len(test_loader)}')
 
     print(f'Script completed in {time.time()-start:.2f} secs')
     return 0
@@ -231,4 +263,3 @@ def main(args):
 if __name__ == '__main__':
     args = parse_args()
     sys.exit(main(args))
-
