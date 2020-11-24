@@ -60,23 +60,25 @@ class TimitDataLoader():
 
     def load_from_wavs(self):
         # load data sets from raw data
-        self.trainX, self.trainY = self.load_dataset(self.root_dir, 'TRAIN')
-        self.testX, self.testY = self.load_dataset(self.root_dir, 'TEST')
+        self.trainX_mfccs, self.trainX_mels, self.trainY = self.load_dataset(self.root_dir, 'TRAIN')
+        self.testX_mfccs, self.testX_mels, self.testY = self.load_dataset(self.root_dir, 'TEST')
 
     def load_from_h5(self, data_dir):
-        self.trainX, self.trainY = self._load_from_h5(os.path.join(data_dir, 'Train.h5'))
-        self.testX, self.testY = self._load_from_h5(os.path.join(data_dir, 'Test.h5'))
+        self.trainX_mfccs, self.trainX_mels, self.trainY = self._load_from_h5(os.path.join(data_dir, 'Train.h5'))
+        self.testX_mfccs, self.testX_mels, self.testY = self._load_from_h5(os.path.join(data_dir, 'Test.h5'))
 
     def _load_from_h5(self, data_file):
         print(f'Loading data from {data_file}')
         with h5py.File(data_file, 'r') as h5f:
-            X = h5f['X']
+            X_mfccs = h5f['X_mfccs']
+            X_mels = h5f['X_mels']
             y = h5f['y']
-            return np.array(X), np.array(y)
+            return np.array(X_mfccs), np.array(X_mels), np.array(y)
 
     def load_dataset(self, root_dir, dataset, max_len=1600):
 
-        X = []
+        Xmfccs = []
+        Xmels = []
         y = []
         print(f'Loading {dataset} dataset from source wavs')
         for i, wav in enumerate(tqdm(glob(os.path.join(root_dir, dataset, '**/*WAV.wav'), recursive=True))):
@@ -99,22 +101,29 @@ class TimitDataLoader():
                 seg = np.pad(samples[start:end], (int(pad), ceil(pad)), 'constant', constant_values=(0,0)) 
 
                 # get features from segment
-                seg = self.extract_features(seg, sr)
-                X.append(seg)
+                mfccs, mels = self.extract_features(seg, sr)
+                Xmfccs.append(mfccs)
+                Xmels.append(mels)
                 y.append(self.timit_dict.phn_to_idx(label[2]))
 
         print(f'loaded {i} wavs, with segment length {max_len}')
 
-        return np.array(X), np.array(y)
+        return np.array(Xmfccs), np.array(Xmels), np.array(y)
 
     def extract_features(self, samples, sr):
+        mels = librosa.feature.melspectrogram(samples,
+                                     sr=sr,
+                                     n_fft=self.num_ffts,
+                                     hop_length=self.hop_length,
+                                     n_mels=self.num_mels)
+
         mfccs = librosa.feature.mfcc(samples,
                                      sr=sr,
                                      n_fft=self.num_ffts,
                                      hop_length=self.hop_length,
                                      n_mels=self.num_mels,
                                      n_mfcc=self.num_mfccs)
-        return mfccs
+        return mfccs, mels
 
     def extract_labels(self, phn_file):
         with open(phn_file, 'r') as f:
@@ -127,22 +136,27 @@ class TimitDataLoader():
         # make output directory if it does not exist
         os.makedirs(out_dir, exist_ok=True)
 
-        self.write_dataset(self.trainX, self.trainY, os.path.join(out_dir, 'Train.h5'))
-        self.write_dataset(self.testX, self.testY, os.path.join(out_dir, 'Test.h5'))
+        self.write_dataset(self.trainX_mfccs, self.trainX_mels, self.trainY, os.path.join(out_dir, 'Train.h5'))
+        self.write_dataset(self.testX_mfccs, self.testX_mels, self.testY, os.path.join(out_dir, 'Test.h5'))
 
-    def write_dataset(self, X, y, out_file):
+    def write_dataset(self, X_mfccs, X_mels, y, out_file):
         with h5py.File(out_file, 'w') as h5f:
-            h5f.create_dataset('X', data=X)
+            h5f.create_dataset('X_mfccs', data=X_mfccs)
+            h5f.create_dataset('X_mels', data=X_mels)
             h5f.create_dataset('y', data=y)
 
     def dataset_stats(self):
-        print(f'Train features -> {self.trainX.shape}')
+        print(f'Train MFCCs features -> {self.trainX_mfccs.shape}')
+        print(f'Train Mels features -> {self.trainX_mels.shape}')
         print(f'Train labels -> {self.trainY.shape}')
-        assert self.trainX.shape[0] == self.trainY.shape[0], "number of training examples don't match number of labels"
+        assert self.trainX_mfccs.shape[0] == self.trainY.shape[0], "number of training examples don't match number of labels"
+        assert self.trainX_mels.shape[0] == self.trainY.shape[0], "number of training examples don't match number of labels"
 
-        print(f'Test features -> {self.testX.shape}')
+        print(f'Test MFCCs features -> {self.testX_mfccs.shape}')
+        print(f'Test Mels features -> {self.testX_mels.shape}')
         print(f'Test labels -> {self.testY.shape}')
-        assert self.testX.shape[0] == self.testY.shape[0], "number of testing examples don't match number of labels"
+        assert self.testX_mfccs.shape[0] == self.testY.shape[0], "number of testing examples don't match number of labels"
+        assert self.testX_mels.shape[0] == self.testY.shape[0], "number of testing examples don't match number of labels"
 
 def main(args):
     start = time.time()

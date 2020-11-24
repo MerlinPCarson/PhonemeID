@@ -13,7 +13,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from torch.autograd import Variable
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
-from model import SimpleCNN, SimpleCNN2D
+from model import SimpleCNN, SimpleCNN2D, DualCNN2D
 
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
@@ -81,40 +81,52 @@ def main(args):
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    # split data into train and validation sets
-    x_train, x_val, y_train, y_val = train_test_split(timit_data.trainX, timit_data.trainY, test_size = 0.1, random_state=args.seed)
+    trainX = np.concatenate((timit_data.trainX_mfccs, timit_data.trainX_mels), axis=1)
 
-    print(f'Training data: {x_train.shape}, validation data: {x_val.shape}')
-    print(f'Training target: {y_train.shape}, validation target: {y_val.shape}')
+    # split data into train and validation sets
+    x_train, x_val, y_train, y_val = train_test_split(trainX, timit_data.trainY, test_size = 0.1, random_state=args.seed)
+
+    x_train_mfccs, x_train_mels = x_train[:,:args.num_mfccs:], x_train[:,args.num_mfccs:,:]
+    x_val_mfccs, x_val_mels = x_val[:,:args.num_mfccs:], x_val[:,args.num_mfccs:,:]
+
+    print(f'Training data mfccs: {x_train_mfccs.shape}, validation data mfccs: {x_val_mfccs.shape}, test data mfccs: {timit_data.testX_mfccs.shape}')
+    print(f'Training data mels: {x_train_mels.shape}, validation data mels: {x_val_mels.shape}, test data mels: {timit_data.testX_mels.shape}')
+    print(f'Training target: {y_train.shape}, validation target: {y_val.shape}, test target {timit_data.testY.shape}')
 
     # get standardization parameters from training set
-    train_mean = np.mean(x_train)
-    train_std = np.std(x_train)
+    train_mean_mfccs = np.mean(x_train_mfccs)
+    train_std_mfccs = np.std(x_train_mfccs)
+    train_mean_mels = np.mean(x_train_mels)
+    train_std_mels = np.std(x_train_mels)
 
     # apply standardization parameters to training and validation sets
-    x_train = (x_train-train_mean)/train_std
-    x_val = (x_val-train_mean)/train_std
-    x_test = (timit_data.trainX-train_mean)/train_std
+    x_train_mfccs = (x_train_mfccs-train_mean_mfccs)/train_std_mfccs
+    x_val_mfccs = (x_val_mfccs-train_mean_mfccs)/train_std_mfccs
+    x_train_mels = (x_train_mels-train_mean_mels)/train_std_mels
+    x_val_mels = (x_val_mels-train_mean_mels)/train_std_mels
+    x_test_mfccs = (timit_data.testX_mfccs-train_mean_mfccs)/train_std_mfccs
+    x_test_mels = (timit_data.testX_mels-train_mean_mels)/train_std_mels
 
     # input shape for each example to network, NOTE: channels first
-    num_channels, num_features = x_train.shape[1], x_train.shape[2]
-    print(f'Input shape to model forward will be: ({args.batch_size}, {num_channels}, {num_features})')
+    num_channels = x_train.shape[1]
+    #print(f'Input shape to model forward will be: ({args.batch_size}, {num_channels}, {num_features})')
 
     # load data for training
-    train_dataset = TensorDataset(torch.Tensor(x_train).unsqueeze(1), torch.LongTensor(y_train))
-    val_dataset = TensorDataset(torch.Tensor(x_val).unsqueeze(1), torch.LongTensor(y_val))
-    test_dataset = TensorDataset(torch.Tensor(x_test).unsqueeze(1), torch.LongTensor(timit_data.trainY))
+    train_dataset = TensorDataset(torch.Tensor(x_train_mfccs).unsqueeze(1), torch.Tensor(x_train_mels).unsqueeze(1), torch.LongTensor(y_train))
+    val_dataset = TensorDataset(torch.Tensor(x_val_mfccs).unsqueeze(1), torch.Tensor(x_val_mels).unsqueeze(1), torch.LongTensor(y_val))
+    test_dataset = TensorDataset(torch.Tensor(x_test_mfccs).unsqueeze(1), torch.Tensor(x_test_mels).unsqueeze(1), torch.LongTensor(timit_data.testY))
 
-    print(f'Number of training examples: {len(x_train)}')
-    print(f'Number of validation examples: {len(x_val)}')
+    print(f'Number of training examples: {len(train_dataset)}')
+    print(f'Number of validation examples: {len(val_dataset)}')
+    print(f'Number of test examples: {len(test_dataset)}')
 
     # create batched data loaders for model
     train_loader = DataLoader(dataset=train_dataset, num_workers=os.cpu_count(), batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(dataset=val_dataset, num_workers=os.cpu_count(), batch_size=args.batch_size, shuffle=False)
-    test_loader = DataLoader(dataset=test_dataset, num_workers=os.cpu_count(), batch_size=args.batch_size, shuffle=False)
+    val_loader = DataLoader(dataset=val_dataset, num_workers=os.cpu_count(), batch_size=args.batch_size, shuffle=True)
+    test_loader = DataLoader(dataset=test_dataset, num_workers=os.cpu_count(), batch_size=args.batch_size, shuffle=True)
 
     # create model
-    model = SimpleCNN2D(num_channels, timit_dict.nphonemes, num_filters=args.num_filters)
+    model = DualCNN2D(num_channels, timit_dict.nphonemes, num_filters=args.num_filters)
 
     # prepare model for data parallelism (use multiple GPUs)
     #model = torch.nn.DataParallel(model, device_ids=device_ids).cuda()
@@ -129,7 +141,9 @@ def main(args):
     scheduler = ReduceLROnPlateau(optimizer, 'min', verbose=True, patience=args.patience//2)
 
     # data struct to track training and validation losses per epoch
-    model_params = {'num_filters': args.num_filters, 'train_mean': train_mean, 'train_std': train_std}
+    model_params = {'num_filters': args.num_filters, 
+                    'train_mean_mfccs': train_mean_mfccs, 'train_std_mels': train_std_mfccs,
+                    'train_mean_mels': train_mean_mels, 'train_std_mels': train_std_mels}
 
     # save model parameters
     history = {'model': model_params, 'loss':[], 'acc': [], 
@@ -153,14 +167,14 @@ def main(args):
 
         model.train()
         # iterate through batches of training examples
-        for segs, phns in tqdm(train_loader):
+        for (mfccs, mels, phns) in tqdm(train_loader):
             model.zero_grad()
 
             # move batch to GPU
             #segs = Variable(segs.cuda())
 
             # make predictions
-            preds = model(segs)
+            preds = model(mfccs, mels)
 
             # running accuracy 
             epoch_train_acc += preds_accuracy(preds, phns)
@@ -177,13 +191,13 @@ def main(args):
         print(f'Validating Model')
         model.eval() 
         with torch.no_grad():
-            for segs, phns in tqdm(val_loader):
+            for (mfccs, mels, phns) in tqdm(val_loader):
 
                 # move batch to GPU
                 #segs = Variable(segs.cuda())
 
                 # make predictions
-                preds = model(segs)
+                preds = model(mfccs, mels)
                 
                 # running accuracy 
                 epoch_val_acc += preds_accuracy(preds, phns)
@@ -236,18 +250,18 @@ def main(args):
     pickle.dump(history, open(os.path.join(args.model_dir, 'final_model.npy'), 'wb'))
 
     # report best stats
- #   print(f'Best epoch: {best_epoch}')
- #   print(f' val loss: {best_val_loss}')
- #   print(f' val acc: {best_val_acc}')
+    print(f'Best epoch: {best_epoch}')
+    print(f' val loss: {best_val_loss}')
+    print(f' val acc: {best_val_acc}')
 
     # test model
     model.load_state_dict(torch.load(os.path.join(args.model_dir, 'best_model.pt')))
     model.eval()
     with torch.no_grad():
         test_acc = 0.0
-        print('Testing')
-        for segs, phns in tqdm(test_loader):
-            preds = model(segs)
+        print('Testing model')
+        for (mfccs, mels, phns) in tqdm(test_loader):
+            preds = model(mfccs, mels)
             # running average of accuracy
             preds = torch.nn.functional.softmax(preds, dim=1)
             _, top_class = preds.topk(k=1, dim=1)
