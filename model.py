@@ -11,32 +11,21 @@ def init_weights(model):
             layer.weight.data.normal_(mean=0, std=math.sqrt(2./9./64.)).clamp_(-0.025,0.025)
             nn.init.constant_(layer.bias.data, 0.0)
 
-
-class SimpleCNN(nn.Module):
-    def __init__(self, num_channels, num_phns, num_layers=17, kernel_size=3, stride=1, num_filters=16):
-        super(SimpleCNN, self).__init__()
-
-        padding = int((kernel_size-stride)/2)
+# Fully Convolutional Neural Network
+class FCNN(nn.Module):
+    def __init__(self, num_channels, num_cnn_blocks=3, kernel_size=3, stride=1, num_filters=16, padding=0):
+        super(FCNN, self).__init__()
 
         # create module list
         self.layers = []
-        self.layers.append(nn.Conv1d(in_channels=num_channels, out_channels=num_filters*4, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers.append(nn.BatchNorm1d(num_filters*4))
-        self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
-        self.layers.append(nn.Conv1d(in_channels=num_filters*4, out_channels=num_filters*2, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers.append(nn.BatchNorm1d(num_filters*2))
-        self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
-        self.layers.append(nn.Conv1d(in_channels=num_filters*2, out_channels=num_filters, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers.append(nn.BatchNorm1d(num_filters))
-        self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
-        self.layers.append(nn.Flatten())
-        self.layers.append(nn.Linear(11*num_filters, num_phns))
+
+        # create CNN blocks
+        for i in range(num_cnn_blocks):
+            self.layers.append(nn.Conv2d(in_channels=1, out_channels=num_filters, 
+                                        kernel_size=kernel_size, bias=True, padding=padding))
+            self.layers.append(nn.BatchNorm2d(num_filters))
+            self.layers.append(nn.PReLU())
+            self.layers.append(nn.Dropout(0.25))
 
         self.model = nn.ModuleList(self.layers)
         init_weights(self.model)
@@ -46,128 +35,52 @@ class SimpleCNN(nn.Module):
             x = layer(x)
         return x
 
-class SimpleCNN2D(nn.Module):
-    def __init__(self, num_channels, num_phns, num_layers=17, kernel_size=3, stride=1, num_filters=16):
-        super(SimpleCNN2D, self).__init__()
-
-        padding = int((kernel_size-stride)/2)
+# Fully connected network
+class FCN(nn.Module):
+    def __init__(self, num_inputs, num_outputs):
+        super(FCN, self).__init__()
 
         # create module list
-        self.layers = []
-        self.layers.append(nn.Conv2d(in_channels=1, out_channels=num_filters, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers.append(nn.BatchNorm2d(num_filters))
-        self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
-        self.layers.append(nn.Conv2d(in_channels=num_filters, out_channels=num_filters*2, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers.append(nn.BatchNorm2d(num_filters*2))
-        self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
-        self.layers.append(nn.Conv2d(in_channels=num_filters*2, out_channels=num_filters*4, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers.append(nn.BatchNorm2d(num_filters*4))
-        self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
-        self.layers.append(nn.Conv2d(in_channels=num_filters*4, out_channels=num_filters*2, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers.append(nn.BatchNorm2d(num_filters*2))
-        self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
-        self.layers.append(nn.Conv2d(in_channels=num_filters*2, out_channels=num_filters, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers.append(nn.BatchNorm2d(num_filters))
-        self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
+        self.layers_class = []
+        self.layers_class.append(nn.Linear(num_inputs, 500))
+        self.layers_mels.append(nn.BatchNorm1d(500))
+        self.layers_class.append(nn.PReLU())
+        self.layers_mels.append(nn.Dropout(0.25))
+        self.layers_class.append(nn.Linear(500, num_outputs))
 
-        self.layers.append(nn.Flatten())
-        self.layers.append(nn.Linear(13*11*num_filters, 250))
-        self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
-        self.layers.append(nn.Linear(250, num_phns))
-
-        self.model = nn.ModuleList(self.layers)
-        #init_weights(self.model)
+        self.model_class = nn.ModuleList(self.layers_class)
 
     def forward(self, x):
         for layer in self.model:
             x = layer(x)
         return x
 
-class DualCNN2D(nn.Module):
-    def __init__(self, num_channels, num_phns, num_layers=17, kernel_size=3, stride=1, num_filters=16):
-        super(DualCNN2D, self).__init__()
+class MultiHeadCNN(nn.Module):
+    def __init__(self, num_features, num_phns, num_channels=1, num_cnn_blocks=3, kernel_size=3, stride=1, num_filters=16):
+        super(MultiHeadCNN, self).__init__()
 
-        padding = int((kernel_size-stride)/2)
-        padding = 0 
+        self.mfcc_model = FCNN(num_channels, num_cnn_blocks, kernel_size, stride, num_filters)
+        self.dist_model = FCNN(num_channels, num_cnn_blocks, kernel_size, stride, num_filters)
+        self.delta_model = FCNN(num_channels, num_cnn_blocks, kernel_size, stride, num_filters)
+        self.delta2_model = FCNN(num_channels, num_cnn_blocks, kernel_size, stride, num_filters)
+        self.pred_model = FCN(num_features, num_phns)
 
-        # create module list
-        self.layers_mfccs = []
-        self.layers_mfccs.append(nn.Conv2d(in_channels=1, out_channels=num_filters, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers_mfccs.append(nn.BatchNorm2d(num_filters))
-        self.layers_mfccs.append(nn.PReLU())
-        self.layers_mfccs.append(nn.Dropout(0.25))
-        self.layers_mfccs.append(nn.Conv2d(in_channels=num_filters, out_channels=num_filters*2, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers_mfccs.append(nn.BatchNorm2d(num_filters*2))
-        self.layers_mfccs.append(nn.PReLU())
-        self.layers_mfccs.append(nn.Dropout(0.25))
-        self.layers_mfccs.append(nn.Conv2d(in_channels=num_filters*2, out_channels=num_filters*4, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers_mfccs.append(nn.BatchNorm2d(num_filters*4))
-        self.layers_mfccs.append(nn.PReLU())
-        self.layers_mfccs.append(nn.Dropout(0.25))
-        self.layers_mfccs.append(nn.Flatten())
+    def forward(self, mfccs, dists=None, deltas=None, deltas2=None):
+        dists_out = deltas_out = deltas2_out = None
 
-        self.model_mfccs = nn.ModuleList(self.layers_mfccs)
-        init_weights(self.model_mfccs)
+        # base features/model
+        mfccs_out = nn.Flatten(self.mfcc_model(mfccs))
 
-        # create module list
-        self.layers_mels = []
-        self.layers_mels.append(nn.Conv2d(in_channels=1, out_channels=num_filters, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers_mels.append(nn.BatchNorm2d(num_filters))
-        self.layers_mels.append(nn.PReLU())
-        self.layers_mels.append(nn.Dropout(0.25))
-        self.layers_mels.append(nn.Conv2d(in_channels=num_filters, out_channels=num_filters*2, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers_mels.append(nn.BatchNorm2d(num_filters*2))
-        self.layers_mels.append(nn.PReLU())
-        self.layers_mels.append(nn.Dropout(0.25))
-        self.layers_mels.append(nn.Conv2d(in_channels=num_filters*2, out_channels=num_filters*4, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers_mels.append(nn.BatchNorm2d(num_filters*4))
-        self.layers_mels.append(nn.PReLU())
-        self.layers_mels.append(nn.Dropout(0.25))
-        self.layers_mels.append(nn.Flatten())
+        # additional (optional) features/models
+        if dists is not None:
+            dists_out = self.dist_model(dists)
+            out = torch.cat((mfccs_out, nn.Flatten(dists_out)), axis=1)
+        if deltas is not None:
+            deltas_out = self.delta_model(deltas)
+            out = torch.cat((out, nn.Flatten(deltas_out)), axis=1)
+        if deltas2 is not None:
+            deltas2_out = self.delta2_model(deltas)
+            out = torch.cat((out, nn.Flatten(deltas2_out)), axis=1)
 
-        self.model_mels = nn.ModuleList(self.layers_mels)
-        init_weights(self.model_mels)
-
-        # create module list
-        self.layers_class = []
-        self.layers_class.append(nn.Linear(7*5*num_filters*4 + 16*5*num_filters*4, 500))
-        self.layers_class.append(nn.PReLU())
-        self.layers_mels.append(nn.Dropout(0.25))
-        self.layers_class.append(nn.Linear(500, num_phns))
-
-        self.model_class = nn.ModuleList(self.layers_class)
-        #init_weights(self.model_class)
-
-    def forward(self, x_mfccs, x_mels):
-        for layer in self.model_mfccs:
-            #print(x_mfccs.shape)
-            x_mfccs = layer(x_mfccs)
-
-        for layer in self.model_mels:
-            #print(x_mels.shape)
-            x_mels = layer(x_mels)
-
-        x = torch.cat((x_mfccs, x_mels), axis=1)
-        #print(x.shape)
-
-        for layer in self.model_class:
-            x = layer(x)
-
-        return x
+        out = self.pred_model()
+        return out
