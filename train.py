@@ -38,7 +38,12 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=1000, help='number of epochs')
     parser.add_argument('--patience', type=int, default=10, help='number of epochs of no improvment before early stopping')
     parser.add_argument('--lr', type=float, default=0.01, help='learning rate')
-    parser.add_argument('--num_filters', type=int, default=32, help='base number of filters for CNN layers')
+    parser.add_argument('--num_channels', type=int, default=1, help='number channels for features')
+    parser.add_argument('--num_filters', type=int, default=16, help='base number of filters for CNN layers')
+    parser.add_argument('--num_cnn_blocks', type=int, default=3, help='number of CNN layers for each CNN feature model')
+    parser.add_argument('--filter_size', type=int, default=3, help='CNN filters size')
+    parser.add_argument('--kernel_size', type=int, default=3, help='CNN kernel size')
+    parser.add_argument('--stride', type=int, default=1, help='CNN kernel stride')
     parser.add_argument('--use_dists', action='store_true', default=True, help='Use distance features')
     parser.add_argument('--use_deltas', action='store_true', default=True, help='Use 1st order MFCC deltas features')
     parser.add_argument('--use_deltas2', action='store_true', default=True, help='Use 2nd order MFCC deltas features')
@@ -56,6 +61,23 @@ def preds_accuracy(preds, target):
     _, top_class = preds.topk(k=1, dim=1)
     equals = top_class == target.view(top_class.shape)
     return torch.mean(equals.type(torch.float))
+
+def calc_cnn_outsize(features, args):
+    cnn_layer_deltas = (args.filter_size - 1) * args.num_cnn_blocks
+    num_features = ((features['mfccs'].shape[1] - cnn_layer_deltas)  
+                    * (features['mfccs'].shape[2] - cnn_layer_deltas))
+
+    if args.use_dists:
+        num_features += features['dists'].shape[1] * features['dists'].shape[2]
+    if args.use_deltas:
+        num_features += ((features['deltas'].shape[1] - cnn_layer_deltas) 
+                         * (features['deltas'].shape[2] - cnn_layer_deltas))
+    if args.use_deltas2:
+        num_features += ((features['deltas2'].shape[1] - cnn_layer_deltas)
+                    * (features['deltas2'].shape[2] - cnn_layer_deltas))
+
+    num_out_features = num_features * args.num_filters
+    return num_out_features 
 
 def main(args):
     start = time.time()
@@ -135,10 +157,12 @@ def main(args):
 
     # create model
     #model = DualCNN2D(num_channels, timit_dict.nphonemes, num_filters=args.num_filters)
+    num_features = calc_cnn_outsize(timit_data.train_feats, args)
+    model = MultiHeadCNN(args.num_channels, num_features, timit_dict.nphonemes, args)
 
     # prepare model for data parallelism (use multiple GPUs)
     #model = torch.nn.DataParallel(model, device_ids=device_ids).cuda()
-    print(model)
+    #print(model)
 
     # setup loss and optimizer
     criterion = torch.nn.CrossEntropyLoss()#.cuda()
@@ -149,14 +173,11 @@ def main(args):
     scheduler = ReduceLROnPlateau(optimizer, 'min', verbose=True, patience=args.patience//2)
 
     # data struct to track training and validation losses per epoch
-    model_params = {'num_filters': args.num_filters, 
-                    'train_mean_mfccs': train_mean_mfccs, 'train_std_mels': train_std_mfccs,
-                    'train_mean_mels': train_mean_mels, 'train_std_mels': train_std_mels}
+    model_params = {'args': args, 'train_stats': train_stats}
 
     # save model parameters
     history = {'model': model_params, 'loss':[], 'acc': [], 
-                                      'val_loss':[], 'val_acc':[], 
-                                      'num_filters': args.num_filters}
+                                      'val_loss':[], 'val_acc':[]}
     pickle.dump(history, open(os.path.join(args.model_dir, 'model.npy'), 'wb'))
 
     # intializiang best values for regularization via early stopping 
@@ -175,14 +196,14 @@ def main(args):
 
         model.train()
         # iterate through batches of training examples
-        for (mfccs, mels, phns) in tqdm(train_loader):
+        for (mfccs, dists, deltas, deltas2, phns) in tqdm(train_loader):
             model.zero_grad()
 
             # move batch to GPU
             #segs = Variable(segs.cuda())
 
             # make predictions
-            preds = model(mfccs, mels)
+            preds = model(mfccs=mfccs, dists=dists, deltas=deltas, deltas2=deltas2)
 
             # running accuracy 
             epoch_train_acc += preds_accuracy(preds, phns)
@@ -199,13 +220,13 @@ def main(args):
         print(f'Validating Model')
         model.eval() 
         with torch.no_grad():
-            for (mfccs, mels, phns) in tqdm(val_loader):
+            for (mfccs, dists, deltas, deltas2, phns) in tqdm(val_loader):
 
                 # move batch to GPU
                 #segs = Variable(segs.cuda())
 
                 # make predictions
-                preds = model(mfccs, mels)
+                preds = model(mfccs=mfccs, dists=dists, deltas=deltas, deltas2=deltas2)
                 
                 # running accuracy 
                 epoch_val_acc += preds_accuracy(preds, phns)
@@ -268,8 +289,14 @@ def main(args):
     with torch.no_grad():
         test_acc = 0.0
         print('Testing model')
-        for (mfccs, mels, phns) in tqdm(test_loader):
-            preds = model(mfccs, mels)
+        for (mfccs, dists, deltas, deltas2, phns) in tqdm(val_loader):
+
+            # move batch to GPU
+            #segs = Variable(segs.cuda())
+
+            # make predictions
+            preds = model(mfccs=mfccs, dists=dists, deltas=deltas, deltas2=deltas2)
+
             # running average of accuracy
             preds = torch.nn.functional.softmax(preds, dim=1)
             _, top_class = preds.topk(k=1, dim=1)
