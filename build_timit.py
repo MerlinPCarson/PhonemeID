@@ -81,12 +81,6 @@ class TimitDataLoader():
 
     def load_dataset(self, root_dir, dataset, max_len=1600):
 
-        Xmfccs = []
-        Xmels = []
-        Xdists = []
-        Xdeltas = []
-        Xdeltas2 = []
-
         features = {'mfccs': [], 'mels': [], 'dists': [], 'deltas': [], 'deltas2': []}
 
         y = []

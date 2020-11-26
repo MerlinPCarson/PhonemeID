@@ -111,41 +111,6 @@ def main(args):
                                                                             timit_data.test_feats, timit_data.test_phns,
                                                                             args, test_size=0.15)
 
-#    trainX = np.concatenate((timit_data.trainX_mfccs, timit_data.trainX_mels), axis=1)
-#
-#    # split data into train and validation sets
-#    x_train, x_val, y_train, y_val = train_test_split(trainX, timit_data.trainY, test_size = 0.1, random_state=args.seed)
-#
-#    x_train_mfccs, x_train_mels = x_train[:,:args.num_mfccs,:], x_train[:,args.num_mfccs:,:]
-#    x_val_mfccs, x_val_mels = x_val[:,:args.num_mfccs,:], x_val[:,args.num_mfccs:,:]
-#
-#    print(f'Training data mfccs: {x_train_mfccs.shape}, validation data mfccs: {x_val_mfccs.shape}, test data mfccs: {timit_data.testX_mfccs.shape}')
-#    print(f'Training data mels: {x_train_mels.shape}, validation data mels: {x_val_mels.shape}, test data mels: {timit_data.testX_mels.shape}')
-#    print(f'Training target: {y_train.shape}, validation target: {y_val.shape}, test target {timit_data.testY.shape}')
-#
-#    # get standardization parameters from training set
-#    train_mean_mfccs = np.mean(x_train_mfccs)
-#    train_std_mfccs = np.std(x_train_mfccs)
-#    train_mean_mels = np.mean(x_train_mels)
-#    train_std_mels = np.std(x_train_mels)
-#
-#    # apply standardization parameters to training and validation sets
-#    x_train_mfccs = (x_train_mfccs-train_mean_mfccs)/train_std_mfccs
-#    x_val_mfccs = (x_val_mfccs-train_mean_mfccs)/train_std_mfccs
-#    x_train_mels = (x_train_mels-train_mean_mels)/train_std_mels
-#    x_val_mels = (x_val_mels-train_mean_mels)/train_std_mels
-#    x_test_mfccs = (timit_data.testX_mfccs-train_mean_mfccs)/train_std_mfccs
-#    x_test_mels = (timit_data.testX_mels-train_mean_mels)/train_std_mels
-
-    # input shape for each example to network, NOTE: channels first
-    #num_channels = x_train.shape[1]
-    #print(f'Input shape to model forward will be: ({args.batch_size}, {num_channels}, {num_features})')
-
-    # load data for training
-    #train_dataset = TensorDataset(torch.Tensor(x_train_mfccs).unsqueeze(1), torch.Tensor(x_train_mels).unsqueeze(1), torch.LongTensor(y_train))
-    #val_dataset = TensorDataset(torch.Tensor(x_val_mfccs).unsqueeze(1), torch.Tensor(x_val_mels).unsqueeze(1), torch.LongTensor(y_val))
-    #test_dataset = TensorDataset(torch.Tensor(x_test_mfccs).unsqueeze(1), torch.Tensor(x_test_mels).unsqueeze(1), torch.LongTensor(timit_data.testY))
-
     print(f'Number of training examples: {len(train_dataset)}')
     print(f'Number of validation examples: {len(val_dataset)}')
     print(f'Number of test examples: {len(test_dataset)}')
@@ -156,13 +121,12 @@ def main(args):
     test_loader = DataLoader(dataset=test_dataset, num_workers=os.cpu_count(), batch_size=args.batch_size, shuffle=True)
 
     # create model
-    #model = DualCNN2D(num_channels, timit_dict.nphonemes, num_filters=args.num_filters)
     num_features = calc_cnn_outsize(timit_data.train_feats, args)
     model = MultiHeadCNN(args.num_channels, num_features, timit_dict.nphonemes, args)
 
     # prepare model for data parallelism (use multiple GPUs)
     #model = torch.nn.DataParallel(model, device_ids=device_ids).cuda()
-    #print(model)
+    print(model)
 
     # setup loss and optimizer
     criterion = torch.nn.CrossEntropyLoss()#.cuda()
@@ -245,7 +209,7 @@ def main(args):
         scheduler.step(epoch_val_loss)
 
         # exponential decay of learning rate
-#        scheduler.step()
+        #scheduler.step()
 
         # save epoch stats
         history['loss'].append(epoch_train_loss)
