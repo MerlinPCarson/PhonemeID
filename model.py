@@ -16,6 +16,10 @@ class FCNN(nn.Module):
     def __init__(self, num_channels, args, padding=0):
         super(FCNN, self).__init__()
 
+        # check for padding to maintain input shape
+        if args.padding_same is True:
+            padding = (args.filter_size - args.stride) // 2
+
         # create module list
         self.layers = []
 
@@ -24,13 +28,13 @@ class FCNN(nn.Module):
                                      kernel_size=args.kernel_size, bias=True, padding=padding))
         self.layers.append(nn.BatchNorm2d(args.num_filters))
         self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
-        for i in range(args.num_cnn_blocks-1):
+        self.layers.append(nn.Dropout(0.4))
+        for _ in range(args.num_cnn_blocks-1):
             self.layers.append(nn.Conv2d(in_channels=args.num_filters, out_channels=args.num_filters, 
                                          kernel_size=args.kernel_size, bias=True, padding=padding))
             self.layers.append(nn.BatchNorm2d(args.num_filters))
             self.layers.append(nn.PReLU())
-            self.layers.append(nn.Dropout(0.25))
+            self.layers.append(nn.Dropout(0.4))
 
         self.model = nn.ModuleList(self.layers)
         init_weights(self.model)
@@ -50,7 +54,7 @@ class FCN(nn.Module):
         self.layers.append(nn.Linear(num_inputs, 500))
         self.layers.append(nn.BatchNorm1d(500))
         self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
+        self.layers.append(nn.Dropout(0.4))
         self.layers.append(nn.Linear(500, num_outputs))
 
         self.model = nn.ModuleList(self.layers)

@@ -44,6 +44,7 @@ def parse_args():
     parser.add_argument('--filter_size', type=int, default=3, help='CNN filters size')
     parser.add_argument('--kernel_size', type=int, default=3, help='CNN kernel size')
     parser.add_argument('--stride', type=int, default=1, help='CNN kernel stride')
+    parser.add_argument('--padding_same', action='store_true', default=True, help='Padding for convolution layers to maintain same shape')
     parser.add_argument('--use_dists', action='store_true', default=True, help='Use distance features')
     parser.add_argument('--use_deltas', action='store_true', default=True, help='Use 1st order MFCC deltas features')
     parser.add_argument('--use_deltas2', action='store_true', default=True, help='Use 2nd order MFCC deltas features')
@@ -62,8 +63,13 @@ def preds_accuracy(preds, target):
     equals = top_class == target.view(top_class.shape)
     return torch.mean(equals.type(torch.float))
 
-def calc_cnn_outsize(features, args):
+def calc_cnn_outsize(features, args, padding=True):
     cnn_layer_deltas = (args.filter_size - 1) * args.num_cnn_blocks
+
+    # if padding is true, there is no delta per layer
+    if padding is True:
+        cnn_layer_deltas = 0
+
     num_features = ((features['mfccs'].shape[1] - cnn_layer_deltas)  
                     * (features['mfccs'].shape[2] - cnn_layer_deltas))
 
@@ -117,8 +123,8 @@ def main(args):
 
     # create batched data loaders for model
     train_loader = DataLoader(dataset=train_dataset, num_workers=os.cpu_count(), batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(dataset=val_dataset, num_workers=os.cpu_count(), batch_size=args.batch_size, shuffle=True)
-    test_loader = DataLoader(dataset=test_dataset, num_workers=os.cpu_count(), batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(dataset=val_dataset, num_workers=os.cpu_count(), batch_size=args.batch_size, shuffle=False)
+    test_loader = DataLoader(dataset=test_dataset, num_workers=os.cpu_count(), batch_size=args.batch_size, shuffle=False)
 
     # create model
     num_features = calc_cnn_outsize(timit_data.train_feats, args)
@@ -253,7 +259,7 @@ def main(args):
     with torch.no_grad():
         test_acc = 0.0
         print('Testing model')
-        for (mfccs, dists, deltas, deltas2, phns) in tqdm(val_loader):
+        for (mfccs, dists, deltas, deltas2, phns) in tqdm(test_loader):
 
             # move batch to GPU
             #segs = Variable(segs.cuda())

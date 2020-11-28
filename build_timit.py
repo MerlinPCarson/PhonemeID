@@ -79,12 +79,13 @@ class TimitDataLoader():
             phns = np.array(h5f['phns'])
             return features, phns 
 
-    def load_dataset(self, root_dir, dataset, max_len=1600):
+    def load_dataset(self, root_dir, dataset, max_len=3200):
 
         features = {'mfccs': [], 'mels': [], 'dists': [], 'deltas': [], 'deltas2': []}
 
         y = []
         print(f'Loading {dataset} dataset from source wavs')
+        #max_size = 0
         for i, wav in enumerate(tqdm(glob(os.path.join(root_dir, dataset, '**/*WAV.wav'), recursive=True))):
             samples, sr = sf.read(wav)
             # load segment times / phonemes from file
@@ -94,6 +95,10 @@ class TimitDataLoader():
                 start = int(phn[0])
                 end = int(phn[1])
                 length = end - start
+                #if length > max_size:
+                #    max_size = length
+                #    print(max_size)
+                #continue
 
                 # skip spoken phonemes over a max length
                 if length > max_len or not self.timit_dict.exists(phn[2]):
