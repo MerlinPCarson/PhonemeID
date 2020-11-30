@@ -30,25 +30,26 @@ def extract_features(samples, sr):
                                      hop_length=160,
                                      n_mels=22,
                                      n_mfcc=13)
-        
+
+    mfccs = mfccs[1:]    
     dists = mfcc_dist(mfccs)
     deltas  = librosa.feature.delta(mfccs, order=1)
     deltas2 = librosa.feature.delta(mfccs, order=2)
     return mfccs, dists, deltas, deltas2
 
-def plot_features(features):
+def plot_features(features, sr):
     titles = ['MFCC', 'Distance', '1st Derivative', '2nd Derivative']
     for title, feature in zip(titles, features):
         plt.figure()
         plt.title(title)
-        librosa.display.specshow(feature, x_axis='time')
+        librosa.display.specshow(feature, x_axis='time', sr=sr, hop_length=160)
         #plt.imshow(feature, interpolation='nearest', aspect='auto')
         #plt.imshow(feature)
         plt.xlabel('Time')
         plt.ylabel('Frequency')
+        plt.colorbar()
 
     #plt.tight_layout()
-    #plt.colorbar()
     plt.show()
 
 def plot_data(samples, phns, sr):
@@ -99,7 +100,9 @@ def main():
 
     #features = extract_features(samples[int(phns[6][0]):int(phns[6][1])], sr)
     features = extract_features(samples[:sr], sr)
-    plot_features(features)
+    print(features[2].mean(), features[2].std())
+    print(features[3].mean(), features[3].std())
+    plot_features(features, sr)
  
 
     print(f'Script completed in {time.time()-start:.2f} secs')

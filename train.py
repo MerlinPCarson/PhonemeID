@@ -30,7 +30,7 @@ def parse_args():
     parser.add_argument('--num_ffts', type=int, default=60, help='n_fft for feature extraction')
     parser.add_argument('--hop_length', type=int, default=160, help='hop_length for feature extraction')
     parser.add_argument('--num_mels', type=int, default=22, help='number of mels')
-    parser.add_argument('--num_mfccs', type=int, default=13, help='number of mfccs')
+    parser.add_argument('--num_mfccs', type=int, default=12, help='number of mfccs')
 
     parser.add_argument('--model_dir', type=str, default='models', help='location of model files')
     parser.add_argument('--seed', type=int, default=42, help='random seed')
@@ -66,7 +66,7 @@ def preds_accuracy(preds, target):
     return torch.mean(equals.type(torch.float))
 
 def calc_cnn_outsize(features, args):
-    cnn_layer_deltas = (args.filter_size - 1) * args.num_cnn_blocks
+    cnn_layer_deltas = (args.filter_size - args.stride) * args.num_cnn_blocks
 
     # if padding is true, there is no delta per layer
     if args.padding_same is True:
@@ -264,9 +264,9 @@ def main(args):
             break
 
     # saving final model
-    print('Saving final model')
-    torch.save(model.state_dict(), os.path.join(args.model_dir, 'final_model.pt'))
-    pickle.dump(history, open(os.path.join(args.model_dir, 'final_model.npy'), 'wb'))
+    #print('Saving final model')
+    #torch.save(model.state_dict(), os.path.join(args.model_dir, 'final_model.pt'))
+    #pickle.dump(history, open(os.path.join(args.model_dir, 'final_model.npy'), 'wb'))
 
     # report best stats
     print(f'Best epoch: {best_epoch}')

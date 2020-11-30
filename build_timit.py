@@ -95,10 +95,6 @@ class TimitDataLoader():
                 start = int(phn[0])
                 end = int(phn[1])
                 length = end - start
-                #if length > max_size:
-                #    max_size = length
-                #    print(max_size)
-                #continue
 
                 # skip spoken phonemes over a max length
                 if length > max_len or not self.timit_dict.exists(phn[2]):
@@ -140,8 +136,10 @@ class TimitDataLoader():
                                      n_fft=self.num_ffts,
                                      hop_length=self.hop_length,
                                      n_mels=self.num_mels,
-                                     n_mfcc=self.num_mfccs)
-        
+                                     n_mfcc=self.num_mfccs+1)
+
+        # drop first MFCC since there is little speech energy in that bin
+        mfccs = mfccs[1:] 
         dists = self.mfcc_dist(mfccs)
         deltas  = librosa.feature.delta(mfccs, order=1)
         deltas2 = librosa.feature.delta(mfccs, order=2)
@@ -243,7 +241,7 @@ def parse_args():
     parser.add_argument('--num_ffts', type=int, default=60, help='n_fft for feature extraction')
     parser.add_argument('--hop_length', type=int, default=160, help='hop_length for feature extraction')
     parser.add_argument('--num_mels', type=int, default=22, help='number of mels')
-    parser.add_argument('--num_mfccs', type=int, default=13, help='number of mfccs')
+    parser.add_argument('--num_mfccs', type=int, default=12, help='number of mfccs')
 
     return parser.parse_args()
 
