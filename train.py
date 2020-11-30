@@ -12,7 +12,7 @@ from prep_data import preprocess_data
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 from torch.autograd import Variable
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import ReduceLROnPlateau, ExponentialLR
 
 from model import MultiHeadCNN 
 
@@ -26,7 +26,7 @@ def parse_args():
                          help='location of Timit Train and Test directories')
     parser.add_argument('--phoneme_dict', type=str, default='../timit/TIMITDIC.TXT',
                          help='location of phoneme dictionary')
-    parser.add_argument('--out_dir', type=str, default='data', help='location to save datasets')
+    parser.add_argument('--data_dir', type=str, default='data', help='location to load .h5 datasets')
     parser.add_argument('--num_ffts', type=int, default=60, help='n_fft for feature extraction')
     parser.add_argument('--hop_length', type=int, default=160, help='hop_length for feature extraction')
     parser.add_argument('--num_mels', type=int, default=22, help='number of mels')
@@ -38,13 +38,15 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=1000, help='number of epochs')
     parser.add_argument('--patience', type=int, default=10, help='number of epochs of no improvment before early stopping')
     parser.add_argument('--lr', type=float, default=0.01, help='learning rate')
+    parser.add_argument('--lr_decay', type=float, default=0.87, help='learning rate multiplicative decay per epoch')
+    parser.add_argument('--dropout', type=float, default=0.6, help='dropout rate for each layer')
     parser.add_argument('--num_channels', type=int, default=1, help='number channels for features')
     parser.add_argument('--num_filters', type=int, default=16, help='base number of filters for CNN layers')
     parser.add_argument('--num_cnn_blocks', type=int, default=3, help='number of CNN layers for each CNN feature model')
     parser.add_argument('--filter_size', type=int, default=3, help='CNN filters size')
     parser.add_argument('--kernel_size', type=int, default=3, help='CNN kernel size')
     parser.add_argument('--stride', type=int, default=1, help='CNN kernel stride')
-    parser.add_argument('--padding_same', action='store_true', default=True, help='Padding for convolution layers to maintain same shape')
+    parser.add_argument('--padding_same', action='store_true', default=False, help='Padding for convolution layers to maintain same shape')
     parser.add_argument('--use_dists', action='store_true', default=True, help='Use distance features')
     parser.add_argument('--use_deltas', action='store_true', default=True, help='Use 1st order MFCC deltas features')
     parser.add_argument('--use_deltas2', action='store_true', default=True, help='Use 2nd order MFCC deltas features')
@@ -63,11 +65,11 @@ def preds_accuracy(preds, target):
     equals = top_class == target.view(top_class.shape)
     return torch.mean(equals.type(torch.float))
 
-def calc_cnn_outsize(features, args, padding=True):
+def calc_cnn_outsize(features, args):
     cnn_layer_deltas = (args.filter_size - 1) * args.num_cnn_blocks
 
     # if padding is true, there is no delta per layer
-    if padding is True:
+    if args.padding_same is True:
         cnn_layer_deltas = 0
 
     num_features = ((features['mfccs'].shape[1] - cnn_layer_deltas)  
@@ -85,6 +87,19 @@ def calc_cnn_outsize(features, args, padding=True):
     num_out_features = num_features * args.num_filters
     return num_out_features 
 
+# function to remove weight decay from output layer
+def weight_decay(model, layer='pred_model.model.4'):
+    params = []
+    for name, param in model.named_parameters():
+        #print(name)
+        if layer in name or '.2' in name or '.6' in name or '.10' in name:
+            print(f'Setting weight decay of {name} to 0')
+            params.append({'params': param, 'weight_decay': 0.})
+        else:
+            params.append({'params': param})
+
+    return params
+
 def main(args):
     start = time.time()
 
@@ -97,7 +112,7 @@ def main(args):
                                  args.hop_length, args.num_mels, args.num_mfccs)
 
     # load dataset from H5 files
-    timit_data.load_from_h5(args.out_dir)
+    timit_data.load_from_h5(args.data_dir)
     
     # show/verify sizes of datasets
     timit_data.dataset_stats()
@@ -106,8 +121,12 @@ def main(args):
     os.makedirs(args.model_dir, exist_ok=True)
 
     # detect gpus and setup environment variables
-    device_ids = setup_gpus()
-    print(f'Cuda devices found: {[torch.cuda.get_device_name(i) for i in device_ids]}')
+    if torch.cuda.is_available() is True:
+        device = 'cuda:0'
+        device_ids = setup_gpus()
+        print(f'Cuda devices found: {[torch.cuda.get_device_name(i) for i in device_ids]}')
+    else:
+        device = 'cpu'
 
     # applying random seed for reproducability
     np.random.seed(args.seed)
@@ -127,20 +146,26 @@ def main(args):
     test_loader = DataLoader(dataset=test_dataset, num_workers=os.cpu_count(), batch_size=args.batch_size, shuffle=False)
 
     # create model
-    num_features = calc_cnn_outsize(timit_data.train_feats, args)
-    model = MultiHeadCNN(args.num_channels, num_features, timit_dict.nphonemes, args)
-
-    # prepare model for data parallelism (use multiple GPUs)
-    #model = torch.nn.DataParallel(model, device_ids=device_ids).cuda()
+    args.num_features = calc_cnn_outsize(timit_data.train_feats, args)
+    args.num_phonemes = timit_dict.nphonemes
+    model = MultiHeadCNN(args)
     print(model)
 
+    # prepare model for data parallelism (use multiple GPUs)
+    if device == 'cuda:0':
+        model = torch.nn.DataParallel(model, device_ids=device_ids).cuda()
+
     # setup loss and optimizer
-    criterion = torch.nn.CrossEntropyLoss()#.cuda()
+    criterion = torch.nn.CrossEntropyLoss().to(device)
     #criterion = torch.nn.NLLLoss()#.cuda()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    #params = weight_decay(model)
+    #optimizer = torch.optim.Adam(params, lr = args.lr, weight_decay = 1e-2)
+
 
     # schedulers
     scheduler = ReduceLROnPlateau(optimizer, 'min', verbose=True, patience=args.patience//2)
+    #scheduler = ExponentialLR(optimizer, args.lr_decay)
 
     # data struct to track training and validation losses per epoch
     model_params = {'args': args, 'train_stats': train_stats}
@@ -169,17 +194,14 @@ def main(args):
         for (mfccs, dists, deltas, deltas2, phns) in tqdm(train_loader):
             model.zero_grad()
 
-            # move batch to GPU
-            #segs = Variable(segs.cuda())
-
             # make predictions
-            preds = model(mfccs=mfccs, dists=dists, deltas=deltas, deltas2=deltas2)
+            preds = model(mfccs=mfccs.to(device), dists=dists.to(device), deltas=deltas.to(device), deltas2=deltas2.to(device))
 
             # running accuracy 
-            epoch_train_acc += preds_accuracy(preds, phns)
+            epoch_train_acc += preds_accuracy(preds.cpu(), phns)
 
             # calculate loss
-            loss = criterion(preds, phns)
+            loss = criterion(preds, phns.to(device))
             epoch_train_loss += loss.item()
 
             # backprop
@@ -192,17 +214,14 @@ def main(args):
         with torch.no_grad():
             for (mfccs, dists, deltas, deltas2, phns) in tqdm(val_loader):
 
-                # move batch to GPU
-                #segs = Variable(segs.cuda())
-
                 # make predictions
-                preds = model(mfccs=mfccs, dists=dists, deltas=deltas, deltas2=deltas2)
+                preds = model(mfccs=mfccs.to(device), dists=dists.to(device), deltas=deltas.to(device), deltas2=deltas2.to(device))
                 
                 # running accuracy 
-                epoch_val_acc += preds_accuracy(preds, phns)
+                epoch_val_acc += preds_accuracy(preds.cpu(), phns)
 
                 # calculate loss
-                val_loss = criterion(preds, phns)
+                val_loss = criterion(preds, phns.to(device))
                 epoch_val_loss += val_loss.item()
 
         # epoch summary
@@ -213,6 +232,7 @@ def main(args):
 
         # reduce learning rate if validation has leveled off
         scheduler.step(epoch_val_loss)
+        #scheduler.step()
 
         # exponential decay of learning rate
         #scheduler.step()
@@ -254,27 +274,34 @@ def main(args):
     print(f' val acc: {best_val_acc}')
 
     # test model
+    print('Loading best model')
     model.load_state_dict(torch.load(os.path.join(args.model_dir, 'best_model.pt')))
     model.eval()
     with torch.no_grad():
+        train_acc = 0.0
         test_acc = 0.0
-        print('Testing model')
-        for (mfccs, dists, deltas, deltas2, phns) in tqdm(test_loader):
 
-            # move batch to GPU
-            #segs = Variable(segs.cuda())
+        print('Testing best model')
+        # iterate through batches of training examples
+        for (mfccs, dists, deltas, deltas2, phns) in tqdm(train_loader):
 
             # make predictions
-            preds = model(mfccs=mfccs, dists=dists, deltas=deltas, deltas2=deltas2)
+            preds = model(mfccs=mfccs.to(device), dists=dists.to(device), deltas=deltas.to(device), deltas2=deltas2.to(device))
 
-            # running average of accuracy
-            preds = torch.nn.functional.softmax(preds, dim=1)
-            _, top_class = preds.topk(k=1, dim=1)
-            equals = top_class == phns.view(top_class.shape)
-            test_acc += torch.mean(equals.type(torch.float))
+            # running accuracy 
+            train_acc += preds_accuracy(preds.cpu(), phns)
+
+        for (mfccs, dists, deltas, deltas2, phns) in tqdm(test_loader):
+
+            # make predictions
+            preds = model(mfccs=mfccs.to(device), dists=dists.to(device), deltas=deltas.to(device), deltas2=deltas2.to(device))
+
+            # running accuracy 
+            test_acc += preds_accuracy(preds.cpu(), phns)
 
     # average of running accuracy
-    print(f' test acc: {test_acc/len(test_loader)}')
+    print(f' Best train acc: {train_acc/len(train_loader)}')
+    print(f' Best test acc: {test_acc/len(test_loader)}')
 
     print(f'Script completed in {time.time()-start:.2f} secs')
     return 0
