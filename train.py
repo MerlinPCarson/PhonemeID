@@ -92,7 +92,7 @@ def weight_decay(model, layer='pred_model.model.4'):
     params = []
     for name, param in model.named_parameters():
         #print(name)
-        if layer in name or '.2' in name or '.6' in name or '.10' in name:
+        if layer in name: #or '.2' in name or '.6' in name or '.10' in name:
             print(f'Setting weight decay of {name} to 0')
             params.append({'params': param, 'weight_decay': 0.})
         else:
@@ -150,6 +150,7 @@ def main(args):
     args.num_phonemes = timit_dict.nphonemes
     model = MultiHeadCNN(args)
     print(model)
+    print(f'total number of parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}')
 
     # prepare model for data parallelism (use multiple GPUs)
     if device == 'cuda:0':
@@ -157,10 +158,10 @@ def main(args):
 
     # setup loss and optimizer
     criterion = torch.nn.CrossEntropyLoss().to(device)
-    #criterion = torch.nn.NLLLoss()#.cuda()
+    #criterion = torch.nn.NLLLoss().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     #params = weight_decay(model)
-    #optimizer = torch.optim.Adam(params, lr = args.lr, weight_decay = 1e-2)
+    #optimizer = torch.optim.Adam(params, lr = args.lr, weight_decay = 1e-4)
 
 
     # schedulers
@@ -266,7 +267,7 @@ def main(args):
     # saving final model
     #print('Saving final model')
     #torch.save(model.state_dict(), os.path.join(args.model_dir, 'final_model.pt'))
-    #pickle.dump(history, open(os.path.join(args.model_dir, 'final_model.npy'), 'wb'))
+    pickle.dump(history, open(os.path.join(args.model_dir, 'final_model.npy'), 'wb'))
 
     # report best stats
     print(f'Best epoch: {best_epoch}')

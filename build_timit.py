@@ -44,7 +44,7 @@ class TimitDictionary():
         return 0
 
 class TimitDataLoader():
-    def __init__(self, root_dir, timit_dict, num_ffts, hop_length, num_mels, num_mfccs):
+    def __init__(self, root_dir=None, timit_dict=None, num_ffts=None, hop_length=None, num_mels=None, num_mfccs=None):
 
         # root directory to timit train and test data
         self.root_dir = root_dir

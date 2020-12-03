@@ -28,13 +28,13 @@ class FCNN(nn.Module):
         self.layers.append(nn.Conv2d(in_channels=args.num_channels, out_channels=args.num_filters, 
                                      kernel_size=args.kernel_size, bias=True, padding=padding))
         self.layers.append(nn.BatchNorm2d(args.num_filters))
-        self.layers.append(nn.PReLU(args.num_filters))
+        self.layers.append(nn.LeakyReLU())
         self.layers.append(nn.Dropout(0.4))
         for _ in range(args.num_cnn_blocks-1):
             self.layers.append(nn.Conv2d(in_channels=args.num_filters, out_channels=args.num_filters, 
                                          kernel_size=args.kernel_size, bias=True, padding=padding))
             self.layers.append(nn.BatchNorm2d(args.num_filters))
-            self.layers.append(nn.PReLU(args.num_filters))
+            self.layers.append(nn.LeakyReLU())
             self.layers.append(nn.Dropout(0.4))
 
         self.model = nn.ModuleList(self.layers)
@@ -55,7 +55,7 @@ class FCN(nn.Module):
         
         self.layers.append(nn.Linear(args.num_features, num_neurons))
         self.layers.append(nn.BatchNorm1d(num_neurons))
-        self.layers.append(nn.PReLU())
+        self.layers.append(nn.LeakyReLU())
         self.layers.append(nn.Dropout(args.dropout))
         self.layers.append(nn.Linear(num_neurons, args.num_phonemes))
 
