@@ -11,6 +11,7 @@ from tqdm import tqdm
 from glob import glob
 import soundfile as sf
 import librosa
+import pickle
 
 class TimitDictionary():
     def __init__(self, dict_file):
@@ -85,7 +86,6 @@ class TimitDataLoader():
 
         y = []
         print(f'Loading {dataset} dataset from source wavs')
-        #max_size = 0
         for i, wav in enumerate(tqdm(glob(os.path.join(root_dir, dataset, '**/*WAV.wav'), recursive=True))):
             samples, sr = sf.read(wav)
             # load segment times / phonemes from file
@@ -206,6 +206,7 @@ def main(args):
 
     # build timit dictionary from timit dictionary file
     timit_dict = TimitDictionary(args.phoneme_dict)
+    pickle.dump(list(timit_dict.phonemes_idx.keys()), open('dict.npy','wb'))
     print(f'Number of phonemes in dictionary: {timit_dict.nphonemes}')
 
     # create timit dataset object 
