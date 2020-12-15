@@ -11,32 +11,31 @@ def init_weights(model):
             layer.weight.data.normal_(mean=0, std=math.sqrt(2./9./64.)).clamp_(-0.025,0.025)
             nn.init.constant_(layer.bias.data, 0.0)
 
+# Fully Convolutional Neural Network
+class FCNN(nn.Module):
+    def __init__(self, args, padding=0):
+        super(FCNN, self).__init__()
 
-class SimpleCNN(nn.Module):
-    def __init__(self, num_channels, num_phns, num_layers=17, kernel_size=3, stride=1, num_filters=16):
-        super(SimpleCNN, self).__init__()
-
-        padding = int((kernel_size-stride)/2)
+        # check for padding to maintain input shape
+        if args.padding_same is True:
+            print('adding padding')
+            padding = (args.filter_size - args.stride) // 2
 
         # create module list
         self.layers = []
-        self.layers.append(nn.Conv1d(in_channels=num_channels, out_channels=num_filters*4, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers.append(nn.BatchNorm1d(num_filters*4))
-        self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
-        self.layers.append(nn.Conv1d(in_channels=num_filters*4, out_channels=num_filters*2, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers.append(nn.BatchNorm1d(num_filters*2))
-        self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
-        self.layers.append(nn.Conv1d(in_channels=num_filters*2, out_channels=num_filters, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers.append(nn.BatchNorm1d(num_filters))
-        self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
-        self.layers.append(nn.Flatten())
-        self.layers.append(nn.Linear(11*num_filters, num_phns))
+
+        # create CNN blocks
+        self.layers.append(nn.Conv2d(in_channels=args.num_channels, out_channels=args.num_filters, 
+                                     kernel_size=args.kernel_size, bias=True, padding=padding))
+        self.layers.append(nn.BatchNorm2d(args.num_filters))
+        self.layers.append(nn.PReLU(args.num_filters))
+        self.layers.append(nn.Dropout(0.4))
+        for _ in range(args.num_cnn_blocks-1):
+            self.layers.append(nn.Conv2d(in_channels=args.num_filters, out_channels=args.num_filters, 
+                                         kernel_size=args.kernel_size, bias=True, padding=padding))
+            self.layers.append(nn.BatchNorm2d(args.num_filters))
+            self.layers.append(nn.PReLU(args.num_filters))
+            self.layers.append(nn.Dropout(0.4))
 
         self.model = nn.ModuleList(self.layers)
         init_weights(self.model)
@@ -46,50 +45,56 @@ class SimpleCNN(nn.Module):
             x = layer(x)
         return x
 
-class SimpleCNN2D(nn.Module):
-    def __init__(self, num_channels, num_phns, num_layers=17, kernel_size=3, stride=1, num_filters=16):
-        super(SimpleCNN2D, self).__init__()
-
-        padding = int((kernel_size-stride)/2)
+# Fully connected network
+class FCN(nn.Module):
+    def __init__(self, args, num_neurons=500):
+        super(FCN, self).__init__()
 
         # create module list
         self.layers = []
-        self.layers.append(nn.Conv2d(in_channels=1, out_channels=num_filters, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers.append(nn.BatchNorm2d(num_filters))
+        
+        self.layers.append(nn.Linear(args.num_features, num_neurons))
+        self.layers.append(nn.BatchNorm1d(num_neurons))
         self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
-        self.layers.append(nn.Conv2d(in_channels=num_filters, out_channels=num_filters*2, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers.append(nn.BatchNorm2d(num_filters*2))
-        self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
-        self.layers.append(nn.Conv2d(in_channels=num_filters*2, out_channels=num_filters*4, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers.append(nn.BatchNorm2d(num_filters*4))
-        self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
-        self.layers.append(nn.Conv2d(in_channels=num_filters*4, out_channels=num_filters*2, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers.append(nn.BatchNorm2d(num_filters*2))
-        self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
-        self.layers.append(nn.Conv2d(in_channels=num_filters*2, out_channels=num_filters, 
-                                     kernel_size=kernel_size, bias=True, padding=padding))
-        self.layers.append(nn.BatchNorm2d(num_filters))
-        self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
-
-        self.layers.append(nn.Flatten())
-        self.layers.append(nn.Linear(13*11*num_filters, 250))
-        self.layers.append(nn.PReLU())
-        self.layers.append(nn.Dropout(0.25))
-        self.layers.append(nn.Linear(250, num_phns))
+        self.layers.append(nn.Dropout(args.dropout))
+        self.layers.append(nn.Linear(num_neurons, args.num_phonemes))
 
         self.model = nn.ModuleList(self.layers)
-        #init_weights(self.model)
 
     def forward(self, x):
         for layer in self.model:
             x = layer(x)
         return x
+
+class MultiHeadCNN(nn.Module):
+    def __init__(self, args):
+        super(MultiHeadCNN, self).__init__()
+
+        self.mfcc_model = FCNN(args)
+        args.num_filters = 32 
+        self.dist_model = FCNN(args, padding=(args.kernel_size - args.stride)//2) # input is too small to not pad
+        args.num_filters = 64 
+        self.delta_model = FCNN(args)
+        args.num_filters = 64 
+        self.delta2_model = FCNN(args)
+        self.pred_model = FCN(args)
+
+    def forward(self, mfccs, dists=None, deltas=None, deltas2=None):
+        dists_out = deltas_out = deltas2_out = None
+
+        # base features/model
+        mfccs_out = self.mfcc_model(mfccs).flatten(start_dim=1)
+
+        # additional (optional) features/models
+        if dists is not None:
+            dists_out = self.dist_model(dists)
+            out = torch.cat((mfccs_out, dists_out.flatten(start_dim=1)), axis=1)
+        if deltas is not None:
+            deltas_out = self.delta_model(deltas)
+            out = torch.cat((out, deltas_out.flatten(start_dim=1)), axis=1)
+        if deltas2 is not None:
+            deltas2_out = self.delta2_model(deltas)
+            out = torch.cat((out, deltas2_out.flatten(start_dim=1)), axis=1)
+
+        out = self.pred_model(out)
+        return out

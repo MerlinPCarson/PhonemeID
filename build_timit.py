@@ -44,7 +44,7 @@ class TimitDictionary():
         return 0
 
 class TimitDataLoader():
-    def __init__(self, root_dir, timit_dict, num_ffts, hop_length, num_mels, num_mfccs):
+    def __init__(self, root_dir=None, timit_dict=None, num_ffts=None, hop_length=None, num_mels=None, num_mfccs=None):
 
         # root directory to timit train and test data
         self.root_dir = root_dir
@@ -60,37 +60,44 @@ class TimitDataLoader():
 
     def load_from_wavs(self):
         # load data sets from raw data
-        self.trainX, self.trainY = self.load_dataset(self.root_dir, 'TRAIN')
-        self.testX, self.testY = self.load_dataset(self.root_dir, 'TEST')
+        self.train_feats, self.train_phns = self.load_dataset(self.root_dir, 'TRAIN')
+        self.test_feats, self.test_phns = self.load_dataset(self.root_dir, 'TEST')
 
     def load_from_h5(self, data_dir):
-        self.trainX, self.trainY = self._load_from_h5(os.path.join(data_dir, 'Train.h5'))
-        self.testX, self.testY = self._load_from_h5(os.path.join(data_dir, 'Test.h5'))
+        self.train_feats, self.train_phns = self._load_from_h5(os.path.join(data_dir, 'Train.h5'))
+        self.test_feats, self.test_phns = self._load_from_h5(os.path.join(data_dir, 'Test.h5'))
 
     def _load_from_h5(self, data_file):
         print(f'Loading data from {data_file}')
+        features = {'mfccs': [], 'mels': [], 'dists': [], 'deltas': [], 'deltas2': []}
         with h5py.File(data_file, 'r') as h5f:
-            X = h5f['X']
-            y = h5f['y']
-            return np.array(X), np.array(y)
+            features['mfccs'] = np.array(h5f['mfccs'])
+            features['mels'] = np.array(h5f['mels'])
+            features['dists'] = np.array(h5f['dists'])
+            features['deltas'] = np.array(h5f['deltas'])
+            features['deltas2'] = np.array(h5f['deltas2'])
+            phns = np.array(h5f['phns'])
+            return features, phns 
 
-    def load_dataset(self, root_dir, dataset, max_len=1600):
+    def load_dataset(self, root_dir, dataset, max_len=3200):
 
-        X = []
+        features = {'mfccs': [], 'mels': [], 'dists': [], 'deltas': [], 'deltas2': []}
+
         y = []
         print(f'Loading {dataset} dataset from source wavs')
+        #max_size = 0
         for i, wav in enumerate(tqdm(glob(os.path.join(root_dir, dataset, '**/*WAV.wav'), recursive=True))):
             samples, sr = sf.read(wav)
             # load segment times / phonemes from file
-            labels = self.extract_labels(wav.replace('.WAV.wav', '.PHN'))
+            phns = self.extract_phonemes(wav.replace('.WAV.wav', '.PHN'))
             # find all segments except header and footer
-            for label in labels[2:-1]:
-                start = int(label[0])
-                end = int(label[1])
+            for phn in phns[2:-1]:
+                start = int(phn[0])
+                end = int(phn[1])
                 length = end - start
 
                 # skip spoken phonemes over a max length
-                if length > max_len or not self.timit_dict.exists(label[2]):
+                if length > max_len or not self.timit_dict.exists(phn[2]):
                     continue                      
                                                                 
                 # centered features in zero padded array of max length         
@@ -99,50 +106,100 @@ class TimitDataLoader():
                 seg = np.pad(samples[start:end], (int(pad), ceil(pad)), 'constant', constant_values=(0,0)) 
 
                 # get features from segment
-                seg = self.extract_features(seg, sr)
-                X.append(seg)
-                y.append(self.timit_dict.phn_to_idx(label[2]))
+                mfccs, mels, dists, deltas, deltas2 = self.extract_features(seg, sr)
+                features['mfccs'].append(mfccs)
+                features['mels'].append(mels)
+                features['dists'].append(dists)
+                features['deltas'].append(deltas)
+                features['deltas2'].append(deltas2)
 
+                y.append(self.timit_dict.phn_to_idx(phn[2]))
+
+        features['mfccs'] = np.array(features['mfccs'])
+        features['mels'] = np.array(features['mels'])
+        features['dists'] = np.array(features['dists'])
+        features['deltas'] = np.array(features['deltas'])
+        features['deltas2'] = np.array(features['deltas2'])
         print(f'loaded {i} wavs, with segment length {max_len}')
-
-        return np.array(X), np.array(y)
+        
+        return features, np.array(y)
 
     def extract_features(self, samples, sr):
+        mels = librosa.feature.melspectrogram(samples,
+                                     sr=sr,
+                                     n_fft=self.num_ffts,
+                                     hop_length=self.hop_length,
+                                     n_mels=self.num_mels)
+
         mfccs = librosa.feature.mfcc(samples,
                                      sr=sr,
                                      n_fft=self.num_ffts,
                                      hop_length=self.hop_length,
                                      n_mels=self.num_mels,
-                                     n_mfcc=self.num_mfccs)
-        return mfccs
+                                     n_mfcc=self.num_mfccs+1)
 
-    def extract_labels(self, phn_file):
+        # drop first MFCC since there is little speech energy in that bin
+        mfccs = mfccs[1:] 
+        dists = self.mfcc_dist(mfccs)
+        deltas  = librosa.feature.delta(mfccs, order=1)
+        deltas2 = librosa.feature.delta(mfccs, order=2)
+        return mfccs, mels, dists, deltas, deltas2
+
+# From Phoneme Boundary Detection Using Learnable Segmental Features, Felix Kreuk et al.
+    def mfcc_dist(self, mfcc):
+        """mfcc_dist
+        calc 4-dimensional dist features like in HTK
+    
+        :param mfcc:
+        """
+        d = []
+        for i in range(2, 9, 2):
+            pad = int(i/2)
+            d_i = np.concatenate([np.zeros(pad), ((mfcc[:, i:] - mfcc[:, :-i]) ** 2).sum(0) ** 0.5, np.zeros(pad)], axis=0)
+            d.append(d_i)
+        return np.stack(d)
+
+    def extract_phonemes(self, phn_file):
         with open(phn_file, 'r') as f:
             lines = f.read().splitlines()
-            labels = [line.split(' ') for line in lines]
+            phonemes = [line.split(' ') for line in lines]
 
-        return labels
+        return phonemes 
 
     def save_dataset_H5(self, out_dir='data'):
         # make output directory if it does not exist
         os.makedirs(out_dir, exist_ok=True)
 
-        self.write_dataset(self.trainX, self.trainY, os.path.join(out_dir, 'Train.h5'))
-        self.write_dataset(self.testX, self.testY, os.path.join(out_dir, 'Test.h5'))
+        self.write_dataset(self.train_feats, self.train_phns, os.path.join(out_dir, 'Train.h5'))
+        self.write_dataset(self.test_feats, self.test_phns, os.path.join(out_dir, 'Test.h5'))
 
-    def write_dataset(self, X, y, out_file):
+    def write_dataset(self, features, phns, out_file):
         with h5py.File(out_file, 'w') as h5f:
-            h5f.create_dataset('X', data=X)
-            h5f.create_dataset('y', data=y)
+            h5f.create_dataset('mfccs', data=features["mfccs"])
+            h5f.create_dataset('mels', data=features["mels"])
+            h5f.create_dataset('dists', data=features["dists"])
+            h5f.create_dataset('deltas', data=features["deltas"])
+            h5f.create_dataset('deltas2', data=features["deltas2"])
+            h5f.create_dataset('phns', data=phns)
 
     def dataset_stats(self):
-        print(f'Train features -> {self.trainX.shape}')
-        print(f'Train labels -> {self.trainY.shape}')
-        assert self.trainX.shape[0] == self.trainY.shape[0], "number of training examples don't match number of labels"
+        print(f'Train MFCCs features -> {self.train_feats["mfccs"].shape}')
+        print(f'Train Mels features -> {self.train_feats["mels"].shape}')
+        print(f'Train Distances features -> {self.train_feats["dists"].shape}')
+        print(f'Train Deltas features -> {self.train_feats["deltas"].shape}')
+        print(f'Train 2nd Deltas features -> {self.train_feats["deltas2"].shape}')
+        print(f'Train phonemes -> {self.train_phns.shape}')
+        for feat in ['mfccs', 'mels', 'dists', 'deltas', 'deltas']:
+            assert self.train_feats[feat].shape[0] == self.train_phns.shape[0], f"number labels don't macth number of examples for {feat}"
 
-        print(f'Test features -> {self.testX.shape}')
-        print(f'Test labels -> {self.testY.shape}')
-        assert self.testX.shape[0] == self.testY.shape[0], "number of testing examples don't match number of labels"
+        print(f'Test MFCCs features -> {self.test_feats["mfccs"].shape}')
+        print(f'Test Mels features -> {self.test_feats["mels"].shape}')
+        print(f'Test Distances features -> {self.test_feats["dists"].shape}')
+        print(f'Test Deltas features -> {self.test_feats["deltas"].shape}')
+        print(f'Test 2nd Deltas features -> {self.test_feats["deltas2"].shape}')
+        print(f'Test phonemes -> {self.test_phns.shape}')
+        for feat in ['mfccs', 'mels', 'dists', 'deltas', 'deltas']:
+            assert self.test_feats[feat].shape[0] == self.test_phns.shape[0], f"number labels don't macth number of examples for {feat}"
 
 def main(args):
     start = time.time()
@@ -184,7 +241,7 @@ def parse_args():
     parser.add_argument('--num_ffts', type=int, default=60, help='n_fft for feature extraction')
     parser.add_argument('--hop_length', type=int, default=160, help='hop_length for feature extraction')
     parser.add_argument('--num_mels', type=int, default=22, help='number of mels')
-    parser.add_argument('--num_mfccs', type=int, default=13, help='number of mfccs')
+    parser.add_argument('--num_mfccs', type=int, default=12, help='number of mfccs')
 
     return parser.parse_args()
 
