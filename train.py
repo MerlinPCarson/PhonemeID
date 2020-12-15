@@ -37,7 +37,7 @@ def parse_args():
     parser.add_argument('--batch_size', type=int, default=16, help='batch size for training')
     parser.add_argument('--epochs', type=int, default=1000, help='number of epochs')
     parser.add_argument('--patience', type=int, default=10, help='number of epochs of no improvment before early stopping')
-    parser.add_argument('--lr', type=float, default=0.01, help='learning rate')
+    parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
     parser.add_argument('--lr_decay', type=float, default=0.87, help='learning rate multiplicative decay per epoch')
     parser.add_argument('--weight_decay', type=float, default=0.01, help='weight decay (L2)')
     parser.add_argument('--use_amsgrad', action='store_true', default=True, help='Use amsgrad for optimizer')
@@ -77,7 +77,8 @@ def calc_cnn_outsize(features, args):
     num_features = ((features['mfccs'].shape[1] - cnn_layer_deltas)  
                     * (features['mfccs'].shape[2] - cnn_layer_deltas))
 
-    num_out_features = num_features * args.num_filters
+    final_feature_channels = args.num_filters//(args.num_cnn_blocks)
+    num_out_features = num_features * final_feature_channels 
     return num_out_features 
 
 # function to remove weight decay from output layer
