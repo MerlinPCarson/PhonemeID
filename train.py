@@ -39,6 +39,8 @@ def parse_args():
     parser.add_argument('--patience', type=int, default=10, help='number of epochs of no improvment before early stopping')
     parser.add_argument('--lr', type=float, default=0.01, help='learning rate')
     parser.add_argument('--lr_decay', type=float, default=0.87, help='learning rate multiplicative decay per epoch')
+    parser.add_argument('--weight_decay', type=float, default=0.01, help='weight decay (L2)')
+    parser.add_argument('--use_amsgrad', action='store_true', default=True, help='Use amsgrad for optimizer')
     parser.add_argument('--dropout', type=float, default=0.6, help='dropout rate for each layer')
     parser.add_argument('--num_channels', type=int, default=3, help='number channels for features')
     parser.add_argument('--num_filters', type=int, default=16, help='base number of filters for CNN layers')
@@ -83,7 +85,8 @@ def weight_decay(model, layer='pred_model.model.4'):
     params = []
     for name, param in model.named_parameters():
         #print(name)
-        if layer in name or '.2' in name or '.6' in name or '.10' in name:
+        #if layer in name or '.2' in name or '.6' in name or '.10' in name:
+        if layer in name or ('.0' not in name and '.4' not in name and '.8' not in name and '.12' not in name and '.16' not in name):
             print(f'Setting weight decay of {name} to 0')
             params.append({'params': param, 'weight_decay': 0.})
         else:
@@ -152,9 +155,9 @@ def main(args):
     # setup loss and optimizer
     criterion = torch.nn.CrossEntropyLoss().to(device)
     #criterion = torch.nn.NLLLoss()#.cuda()
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    #params = weight_decay(model)
-    #optimizer = torch.optim.Adam(params, lr = args.lr, weight_decay = 1e-2)
+    #optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    params = weight_decay(model)
+    optimizer = torch.optim.AdamW(params, lr=args.lr, weight_decay=args.weight_decay, amsgrad=args.use_amsgrad)
 
 
     # schedulers
@@ -226,7 +229,6 @@ def main(args):
 
         # reduce learning rate if validation has leveled off
         scheduler.step(epoch_val_loss)
-        #scheduler.step()
 
         # exponential decay of learning rate
         #scheduler.step()
@@ -257,10 +259,10 @@ def main(args):
             print('Initiating early stopping')
             break
 
-    # saving final model
+    # saving final model and training stats
     #print('Saving final model')
     #torch.save(model.state_dict(), os.path.join(args.model_dir, 'final_model.pt'))
-    #pickle.dump(history, open(os.path.join(args.model_dir, 'final_model.npy'), 'wb'))
+    pickle.dump(history, open(os.path.join(args.model_dir, 'final_model.npy'), 'wb'))
 
     # report best stats
     print(f'Best epoch: {best_epoch}')
@@ -285,6 +287,8 @@ def main(args):
             # running accuracy 
             train_acc += preds_accuracy(preds.cpu(), phns)
 
+        set_preds = []
+        set_targets = []
         for features, phns in tqdm(test_loader):
 
             # make predictions
@@ -292,6 +296,15 @@ def main(args):
 
             # running accuracy 
             test_acc += preds_accuracy(preds.cpu(), phns)
+
+            # save predictions
+            preds = torch.nn.functional.softmax(preds.cpu(), dim=1)
+            _, top_class = preds.topk(k=1, dim=1)
+            set_preds.extend(top_class.flatten())
+            set_targets.extend(phns.flatten())
+
+    # save test preds to disk
+    pickle.dump({'preds':set_preds, 'targets':set_targets}, open(os.path.join(args.model_dir, 'test_preds.npy'),'wb'))
 
     # average of running accuracy
     print(f' Best train acc: {train_acc/len(train_loader)}')
