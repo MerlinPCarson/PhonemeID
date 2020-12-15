@@ -73,26 +73,27 @@ def calc_cnn_outsize(features, args):
         cnn_layer_deltas = 0
 
     num_features = ((features['mfccs'].shape[1] - cnn_layer_deltas)  
-                    * (features['mfccs'].shape[2] - cnn_layer_deltas))
+                    * (features['mfccs'].shape[2] - cnn_layer_deltas)) * args.num_filters
 
     if args.use_dists:
-        num_features += features['dists'].shape[1] * features['dists'].shape[2]
+        num_features += features['dists'].shape[1] * features['dists'].shape[2] * 32 
     if args.use_deltas:
         num_features += ((features['deltas'].shape[1] - cnn_layer_deltas) 
-                         * (features['deltas'].shape[2] - cnn_layer_deltas))
+                         * (features['deltas'].shape[2] - cnn_layer_deltas)) * 64 
     if args.use_deltas2:
         num_features += ((features['deltas2'].shape[1] - cnn_layer_deltas)
-                    * (features['deltas2'].shape[2] - cnn_layer_deltas))
+                    * (features['deltas2'].shape[2] - cnn_layer_deltas)) * 64 
 
-    num_out_features = num_features * args.num_filters
-    return num_out_features 
+    #num_features = num_features * args.num_filters
+    return num_features 
 
-# function to remove weight decay from output layer
+# function to remove weight decay from output layer, or from PReLU
 def weight_decay(model, layer='pred_model.model.4'):
     params = []
     for name, param in model.named_parameters():
-        #print(name)
-        if layer in name: #or '.2' in name or '.6' in name or '.10' in name:
+        print(name)
+        #if layer in name# or '.2' in name or '.6' in name or '.10' in name or '.14' in name or '18' in name:
+        if layer in name or ('.0' not in name and '.4' not in name and '.8' not in name and '.12' not in name and '.16' not in name):
             print(f'Setting weight decay of {name} to 0')
             params.append({'params': param, 'weight_decay': 0.})
         else:
@@ -159,9 +160,9 @@ def main(args):
     # setup loss and optimizer
     criterion = torch.nn.CrossEntropyLoss().to(device)
     #criterion = torch.nn.NLLLoss().to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    #params = weight_decay(model)
-    #optimizer = torch.optim.Adam(params, lr = args.lr, weight_decay = 1e-4)
+    #optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    params = weight_decay(model)
+    optimizer = torch.optim.AdamW(params, weight_decay=1e-2, amsgrad=True)
 
 
     # schedulers
@@ -292,6 +293,8 @@ def main(args):
             # running accuracy 
             train_acc += preds_accuracy(preds.cpu(), phns)
 
+        set_preds = []
+        set_targets = []
         for (mfccs, dists, deltas, deltas2, phns) in tqdm(test_loader):
 
             # make predictions
@@ -299,6 +302,15 @@ def main(args):
 
             # running accuracy 
             test_acc += preds_accuracy(preds.cpu(), phns)
+
+            # save predictions
+            preds = torch.nn.functional.softmax(preds.cpu(), dim=1)
+            _, top_class = preds.topk(k=1, dim=1)
+            set_preds.extend(top_class.flatten())
+            set_targets.extend(phns.flatten())
+
+    # save test preds to disk
+    pickle.dump({'preds':set_preds, 'targets':set_targets}, open(os.path.join(args.model_dir, 'test_preds.npy'),'wb'))
 
     # average of running accuracy
     print(f' Best train acc: {train_acc/len(train_loader)}')
