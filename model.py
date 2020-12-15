@@ -66,32 +66,18 @@ class FCN(nn.Module):
             x = layer(x)
         return x
 
-class MultiHeadCNN(nn.Module):
+class PhonemeID_CNN(nn.Module):
     def __init__(self, args):
-        super(MultiHeadCNN, self).__init__()
+        super(PhonemeID_CNN, self).__init__()
 
-        self.mfcc_model = FCNN(args)
-        self.dist_model = FCNN(args, padding=(args.kernel_size - args.stride)//2) # input is too small to not pad
-        self.delta_model = FCNN(args)
-        self.delta2_model = FCNN(args)
+        self.feature_model = FCNN(args)
         self.pred_model = FCN(args)
 
-    def forward(self, mfccs, dists=None, deltas=None, deltas2=None):
-        dists_out = deltas_out = deltas2_out = None
+    def forward(self, x):
 
         # base features/model
-        mfccs_out = self.mfcc_model(mfccs).flatten(start_dim=1)
+        features = self.feature_model(x).flatten(start_dim=1)
 
-        # additional (optional) features/models
-        if dists is not None:
-            dists_out = self.dist_model(dists)
-            out = torch.cat((mfccs_out, dists_out.flatten(start_dim=1)), axis=1)
-        if deltas is not None:
-            deltas_out = self.delta_model(deltas)
-            out = torch.cat((out, deltas_out.flatten(start_dim=1)), axis=1)
-        if deltas2 is not None:
-            deltas2_out = self.delta2_model(deltas)
-            out = torch.cat((out, deltas2_out.flatten(start_dim=1)), axis=1)
-
-        out = self.pred_model(out)
+        # prediction model
+        out = self.pred_model(features)
         return out

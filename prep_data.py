@@ -95,23 +95,21 @@ def preprocess_data(train_features, train_labels, test_features, test_labels, ar
         val_features['deltas2'] = (val_features['deltas2'] - deltas2_mean) / deltas2_std
         test_features['deltas2'] = (test_features['deltas2'] - deltas2_mean) / deltas2_std
 
-    # load data for training
-    train_dataset = TensorDataset(torch.Tensor(train_features['mfccs']).unsqueeze(1),
-                                  torch.Tensor(train_features['dists']).unsqueeze(1),
-                                  torch.Tensor(train_features['deltas']).unsqueeze(1),
-                                  torch.Tensor(train_features['deltas2']).unsqueeze(1),
-                                  torch.LongTensor(y_train))
+    # create dataset by concatenating features
+    train_data = torch.cat((torch.Tensor(train_features['mfccs']).unsqueeze(1), 
+                            torch.Tensor(train_features['deltas']).unsqueeze(1), 
+                            torch.Tensor(train_features['deltas2']).unsqueeze(1)), axis=1)
 
-    val_dataset = TensorDataset(torch.Tensor(val_features['mfccs']).unsqueeze(1),
-                                  torch.Tensor(val_features['dists']).unsqueeze(1),
-                                  torch.Tensor(val_features['deltas']).unsqueeze(1),
-                                  torch.Tensor(val_features['deltas2']).unsqueeze(1),
-                                  torch.LongTensor(y_val))
+    val_data = torch.cat((torch.Tensor(val_features['mfccs']).unsqueeze(1), 
+                            torch.Tensor(val_features['deltas']).unsqueeze(1), 
+                            torch.Tensor(val_features['deltas2']).unsqueeze(1)), axis=1)
 
-    test_dataset = TensorDataset(torch.Tensor(test_features['mfccs']).unsqueeze(1),
-                                  torch.Tensor(test_features['dists']).unsqueeze(1),
-                                  torch.Tensor(test_features['deltas']).unsqueeze(1),
-                                  torch.Tensor(test_features['deltas2']).unsqueeze(1),
-                                  torch.LongTensor(test_labels))
+    test_data = torch.cat((torch.Tensor(test_features['mfccs']).unsqueeze(1), 
+                            torch.Tensor(test_features['deltas']).unsqueeze(1), 
+                            torch.Tensor(test_features['deltas2']).unsqueeze(1)), axis=1)
+
+    train_dataset = TensorDataset(train_data, torch.LongTensor(y_train))
+    val_dataset = TensorDataset(val_data, torch.LongTensor(y_val))
+    test_dataset = TensorDataset(test_data, torch.LongTensor(test_labels))
 
     return train_dataset, val_dataset, test_dataset, train_stats

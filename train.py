@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from torch.autograd import Variable
 from torch.optim.lr_scheduler import ReduceLROnPlateau, ExponentialLR
 
-from model import MultiHeadCNN 
+from model import PhonemeID_CNN 
 
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
@@ -40,7 +40,7 @@ def parse_args():
     parser.add_argument('--lr', type=float, default=0.01, help='learning rate')
     parser.add_argument('--lr_decay', type=float, default=0.87, help='learning rate multiplicative decay per epoch')
     parser.add_argument('--dropout', type=float, default=0.6, help='dropout rate for each layer')
-    parser.add_argument('--num_channels', type=int, default=1, help='number channels for features')
+    parser.add_argument('--num_channels', type=int, default=3, help='number channels for features')
     parser.add_argument('--num_filters', type=int, default=16, help='base number of filters for CNN layers')
     parser.add_argument('--num_cnn_blocks', type=int, default=3, help='number of CNN layers for each CNN feature model')
     parser.add_argument('--filter_size', type=int, default=3, help='CNN filters size')
@@ -74,15 +74,6 @@ def calc_cnn_outsize(features, args):
 
     num_features = ((features['mfccs'].shape[1] - cnn_layer_deltas)  
                     * (features['mfccs'].shape[2] - cnn_layer_deltas))
-
-    if args.use_dists:
-        num_features += features['dists'].shape[1] * features['dists'].shape[2]
-    if args.use_deltas:
-        num_features += ((features['deltas'].shape[1] - cnn_layer_deltas) 
-                         * (features['deltas'].shape[2] - cnn_layer_deltas))
-    if args.use_deltas2:
-        num_features += ((features['deltas2'].shape[1] - cnn_layer_deltas)
-                    * (features['deltas2'].shape[2] - cnn_layer_deltas))
 
     num_out_features = num_features * args.num_filters
     return num_out_features 
@@ -148,8 +139,11 @@ def main(args):
     # create model
     args.num_features = calc_cnn_outsize(timit_data.train_feats, args)
     args.num_phonemes = timit_dict.nphonemes
-    model = MultiHeadCNN(args)
+    model = PhonemeID_CNN(args)
+
+    # show model
     print(model)
+    print(f'total number of parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}')
 
     # prepare model for data parallelism (use multiple GPUs)
     if device == 'cuda:0':
@@ -191,11 +185,11 @@ def main(args):
 
         model.train()
         # iterate through batches of training examples
-        for (mfccs, dists, deltas, deltas2, phns) in tqdm(train_loader):
+        for features, phns in tqdm(train_loader):
             model.zero_grad()
 
             # make predictions
-            preds = model(mfccs=mfccs.to(device), dists=dists.to(device), deltas=deltas.to(device), deltas2=deltas2.to(device))
+            preds = model(features.to(device))
 
             # running accuracy 
             epoch_train_acc += preds_accuracy(preds.cpu(), phns)
@@ -212,10 +206,10 @@ def main(args):
         print(f'Validating Model')
         model.eval() 
         with torch.no_grad():
-            for (mfccs, dists, deltas, deltas2, phns) in tqdm(val_loader):
+            for features, phns in tqdm(val_loader):
 
                 # make predictions
-                preds = model(mfccs=mfccs.to(device), dists=dists.to(device), deltas=deltas.to(device), deltas2=deltas2.to(device))
+                preds = model(features.to(device))
                 
                 # running accuracy 
                 epoch_val_acc += preds_accuracy(preds.cpu(), phns)
@@ -283,18 +277,18 @@ def main(args):
 
         print('Testing best model')
         # iterate through batches of training examples
-        for (mfccs, dists, deltas, deltas2, phns) in tqdm(train_loader):
+        for features, phns in tqdm(train_loader):
 
             # make predictions
-            preds = model(mfccs=mfccs.to(device), dists=dists.to(device), deltas=deltas.to(device), deltas2=deltas2.to(device))
+            preds = model(features)
 
             # running accuracy 
             train_acc += preds_accuracy(preds.cpu(), phns)
 
-        for (mfccs, dists, deltas, deltas2, phns) in tqdm(test_loader):
+        for features, phns in tqdm(test_loader):
 
             # make predictions
-            preds = model(mfccs=mfccs.to(device), dists=dists.to(device), deltas=deltas.to(device), deltas2=deltas2.to(device))
+            preds = model(features)
 
             # running accuracy 
             test_acc += preds_accuracy(preds.cpu(), phns)
