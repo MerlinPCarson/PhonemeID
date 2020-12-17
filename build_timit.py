@@ -307,7 +307,7 @@ def main(args):
 
     # save timit dictionary object to file
     pickle.dump(timit_dict, open(os.path.join(args.out_dir, args.timit_dict_file),'wb'))
-    print(f'Timit dictionary saved to {timit_dict_file}.')
+    print(f'Timit dictionary saved to {args.timit_dict_file}.')
 
     # load dataset from H5 files
     timit_data.load_from_h5(args.out_dir)
