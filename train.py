@@ -77,7 +77,7 @@ def calc_cnn_outsize(features, args):
     num_features = ((features['mfccs'].shape[1] - cnn_layer_deltas)  
                     * (features['mfccs'].shape[2] - cnn_layer_deltas))
 
-    final_feature_channels = args.num_filters//(args.num_cnn_blocks)
+    final_feature_channels = args.num_filters//2**(args.num_cnn_blocks-1)
     num_out_features = num_features * final_feature_channels 
     return num_out_features 
 

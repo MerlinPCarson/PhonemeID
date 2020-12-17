@@ -30,11 +30,11 @@ class FCNN(nn.Module):
         self.layers.append(nn.BatchNorm2d(args.num_filters))
         self.layers.append(nn.PReLU(args.num_filters))
         self.layers.append(nn.Dropout(0.4))
-        for i in range(1, args.num_cnn_blocks):
-            self.layers.append(nn.Conv2d(in_channels=args.num_filters//i, out_channels=args.num_filters//(i+1), 
+        for i in range(args.num_cnn_blocks-1):
+            self.layers.append(nn.Conv2d(in_channels=args.num_filters//2**i, out_channels=args.num_filters//2**(i+1), 
                                          kernel_size=args.kernel_size, bias=True, padding=padding))
-            self.layers.append(nn.BatchNorm2d(args.num_filters//(i+1)))
-            self.layers.append(nn.PReLU(args.num_filters//(i+1)))
+            self.layers.append(nn.BatchNorm2d(args.num_filters//2**(i+1)))
+            self.layers.append(nn.PReLU(args.num_filters//2**(i+1)))
             self.layers.append(nn.Dropout(0.4))
 
         self.model = nn.ModuleList(self.layers)
