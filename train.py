@@ -24,8 +24,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Timit dataset builder')
     parser.add_argument('--timit_path', type=str, default='../timit/data',
                          help='location of Timit Train and Test directories')
-    parser.add_argument('--phoneme_dict', type=str, default='../timit/TIMITDIC.TXT',
-                         help='location of phoneme dictionary')
+    parser.add_argument('--timit_dict', type=str, default='timit_dict.npy',
+                         help='location of phoneme dictionary object')
     parser.add_argument('--data_dir', type=str, default='data', help='location to load .h5 datasets')
     parser.add_argument('--num_ffts', type=int, default=60, help='n_fft for feature extraction')
     parser.add_argument('--hop_length', type=int, default=160, help='hop_length for feature extraction')
@@ -91,7 +91,6 @@ def calc_cnn_outsize(features, args):
 def weight_decay(model, layer='pred_model.model.4'):
     params = []
     for name, param in model.named_parameters():
-        print(name)
         #if layer in name# or '.2' in name or '.6' in name or '.10' in name or '.14' in name or '18' in name:
         if layer in name or ('.0' not in name and '.4' not in name and '.8' not in name and '.12' not in name and '.16' not in name):
             print(f'Setting weight decay of {name} to 0')
@@ -105,8 +104,9 @@ def main(args):
     start = time.time()
 
     # build timit dictionary from timit dictionary file
-    timit_dict = TimitDictionary(args.phoneme_dict)
-    print(f'Number of phonemes in dictionary: {timit_dict.nphonemes}')
+    #timit_dict = TimitDictionary(args.timit_path)
+    timit_dict = pickle.load(open(os.path.join(args.data_dir, args.timit_dict), 'rb')) 
+    print(f'Number of phonemes in dictionary: {timit_dict.num_phonemes}')
 
     # create timit dataset object 
     timit_data = TimitDataLoader(args.timit_path, timit_dict, args.num_ffts, 
@@ -148,7 +148,7 @@ def main(args):
 
     # create model
     args.num_features = calc_cnn_outsize(timit_data.train_feats, args)
-    args.num_phonemes = timit_dict.nphonemes
+    args.num_phonemes = timit_dict.num_phonemes
     model = MultiHeadCNN(args)
     print(model)
     print(f'total number of parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}')

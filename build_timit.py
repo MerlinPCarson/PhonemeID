@@ -3,6 +3,7 @@ import re
 import sys
 import time
 import h5py
+import pickle
 import torch
 import argparse
 import numpy as np
@@ -13,9 +14,61 @@ import soundfile as sf
 import librosa
 
 class TimitDictionary():
-    def __init__(self, dict_file):
-        self.dict_file = dict_file
-        self.parse_timit_dict()
+    def __init__(self, dataset):
+
+        # parse dataset for phonemes
+        self.parse_dataset_phonemes(dataset)
+
+        # assign phonemes to dictionary
+        self.idx_phonemes = {key: value for key, value in enumerate(self.phonemes)}
+        self.phonemes_idx = {value: key for key, value in self.idx_phonemes.items()}
+
+        # combines phonemes that are interchangably used in dictionary 
+        self.fold_phonemes()
+
+        # renumber phonemes from 0 to number of phonemes
+        self.renumber_phonemes()
+
+        # parse dictionary for phonemes
+#        self.dict_file = dict_file
+#        self.parse_timit_dict()
+
+    def renumber_phonemes(self):
+        numbers = []
+
+        # find unique numbers
+        for _, value in self.phonemes_idx.items():
+            if value not in numbers:
+                numbers.append(value)
+
+        # reassign numbers starting at 0
+        for i, number in enumerate(numbers):
+            for key in self.phonemes_idx:
+                if self.phonemes_idx[key] == number:
+                    self.phonemes_idx[key] = i
+
+        # new number of phonemes after folding
+        self.num_phonemes = len(numbers)
+
+        # final numbering of folded phonemes
+        for i in range(len(numbers)):
+            print(f'{i}: ', end=' ')
+            for key, value in self.phonemes_idx.items():
+                if value == i:
+                    print(key, end=' ')
+            print()
+
+    def parse_dataset_phonemes(self, dataset):
+        all_phonemes = []
+        print('Finding all phonemes in dataset')
+        for phn_file in tqdm(glob(os.path.join(dataset, '**/*.PHN'), recursive=True)):
+            phns = TimitDataLoader.extract_phonemes(phn_file)
+            # last element is phonme name
+            phns = np.array(phns)[:,-1]
+            all_phonemes.extend(phns.tolist())
+
+        self.phonemes = set(all_phonemes)
+        self.num_phonemes = len(self.phonemes)
 
     def parse_timit_dict(self):
         phonemes = []
@@ -30,10 +83,40 @@ class TimitDictionary():
 
         # remove duplicates
         phonemes = set(phonemes)
-        self.nphonemes = len(phonemes)
+        self.num_phonemes = len(phonemes)
 
+        # create look-up dictionaries for each phoneme
         self.idx_phonemes = {key: value for key, value in enumerate(phonemes)}
         self.phonemes_idx = {value: key for key, value in self.idx_phonemes.items()}
+
+        # fold similar phonemes from: Speaker-indepented phone recognition using hidden Markov models.
+        self.fold_phonmes()
+
+    # combine phonemes that have similar usages throughout dictionary 
+    def fold_phonemes(self):
+        self.phonemes_idx['ih'] = self.phonemes_idx['ix']
+        self.phonemes_idx['ah'] = self.phonemes_idx['ax']
+        self.phonemes_idx['ax-h'] = self.phonemes_idx['ax']
+        self.phonemes_idx['ux'] = self.phonemes_idx['uw']
+        self.phonemes_idx['aa'] = self.phonemes_idx['ao']
+        self.phonemes_idx['axr'] = self.phonemes_idx['er']
+        self.phonemes_idx['el'] = self.phonemes_idx['l']
+        self.phonemes_idx['em'] = self.phonemes_idx['m']
+        self.phonemes_idx['en'] = self.phonemes_idx['n']
+        self.phonemes_idx['nx'] = self.phonemes_idx['n']
+        self.phonemes_idx['eng'] = self.phonemes_idx['ng']
+        self.phonemes_idx['sh'] = self.phonemes_idx['zh']
+        self.phonemes_idx['hv'] = self.phonemes_idx['hh']
+        self.phonemes_idx['#h'] = self.phonemes_idx['h#']
+        self.phonemes_idx['bcl'] = self.phonemes_idx['h#']
+        self.phonemes_idx['pcl'] = self.phonemes_idx['h#']
+        self.phonemes_idx['dcl'] = self.phonemes_idx['h#']
+        self.phonemes_idx['tcl'] = self.phonemes_idx['h#']
+        self.phonemes_idx['gcl'] = self.phonemes_idx['h#']
+        self.phonemes_idx['kcl'] = self.phonemes_idx['h#']
+        self.phonemes_idx['q'] = self.phonemes_idx['h#']
+        self.phonemes_idx['epi'] = self.phonemes_idx['h#']
+        self.phonemes_idx['pau'] = self.phonemes_idx['h#']
 
     def phn_to_idx(self, phn):
         return self.phonemes_idx[phn]
@@ -159,7 +242,8 @@ class TimitDataLoader():
             d.append(d_i)
         return np.stack(d)
 
-    def extract_phonemes(self, phn_file):
+    @staticmethod
+    def extract_phonemes(phn_file):
         with open(phn_file, 'r') as f:
             lines = f.read().splitlines()
             phonemes = [line.split(' ') for line in lines]
@@ -205,8 +289,8 @@ def main(args):
     start = time.time()
 
     # build timit dictionary from timit dictionary file
-    timit_dict = TimitDictionary(args.phoneme_dict)
-    print(f'Number of phonemes in dictionary: {timit_dict.nphonemes}')
+    timit_dict = TimitDictionary(args.timit_path)
+    print(f'Number of phonemes in dictionary: {timit_dict.num_phonemes}')
 
     # create timit dataset object 
     timit_data = TimitDataLoader(args.timit_path, timit_dict, args.num_ffts, 
@@ -220,6 +304,10 @@ def main(args):
 
     # save timit dataset to H5 files
     timit_data.save_dataset_H5(args.out_dir)
+
+    # save timit dictionary object to file
+    pickle.dump(timit_dict, open(os.path.join(args.out_dir, args.timit_dict_file),'wb'))
+    print(f'Timit dictionary saved to {timit_dict_file}.')
 
     # load dataset from H5 files
     timit_data.load_from_h5(args.out_dir)
@@ -235,6 +323,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Timit dataset builder')
     parser.add_argument('--timit_path', type=str, default='../timit/data',
                          help='location of Timit Train and Test directories')
+    parser.add_argument('--timit_dict_file', type=str, default='timit_dict.npy',
+                         help='location to save phoneme dictionary object')
     parser.add_argument('--phoneme_dict', type=str, default='../timit/TIMITDIC.TXT',
                          help='location of phoneme dictionary')
     parser.add_argument('--out_dir', type=str, default='data', help='location to save datasets')
