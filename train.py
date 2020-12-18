@@ -136,7 +136,7 @@ def main(args):
 
     train_dataset, val_dataset, test_dataset, train_stats = preprocess_data(timit_data.train_feats, timit_data.train_phns,
                                                                             timit_data.test_feats, timit_data.test_phns,
-                                                                            args, test_size=0.15)
+                                                                            args, test_size=0.05)
 
     print(f'Number of training examples: {len(train_dataset)}')
     print(f'Number of validation examples: {len(val_dataset)}')
