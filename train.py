@@ -89,11 +89,12 @@ def calc_cnn_outsize(features, args):
 
 # function to remove weight decay from output layer, or from PReLU
 def weight_decay(model, layer='pred_model.model.4'):
+    print('Setting output layer, batch normalization layers and PReLU activation layers weight decay to 0.0')
     params = []
     for name, param in model.named_parameters():
         #if layer in name# or '.2' in name or '.6' in name or '.10' in name or '.14' in name or '18' in name:
         if layer in name or ('.0' not in name and '.4' not in name and '.8' not in name and '.12' not in name and '.16' not in name):
-            print(f'Setting weight decay of {name} to 0')
+            #print(f'Setting weight decay of {name} to 0')
             params.append({'params': param, 'weight_decay': 0.})
         else:
             params.append({'params': param})
