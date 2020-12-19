@@ -3,11 +3,12 @@ import torch.nn as nn
 import math
 
 
+# initilize weights using Kaiming Normal weight intializtion
 def init_weights(model):
     for layer in model:
-        if isinstance(layer, nn.Conv1d):
+        if isinstance(layer, nn.Conv2d):
             nn.init.kaiming_normal_(layer.weight.data, a=0, mode='fan_in')
-        if isinstance(layer, nn.BatchNorm1d):
+        if isinstance(layer, nn.BatchNorm2d):
             layer.weight.data.normal_(mean=0, std=math.sqrt(2./9./64.)).clamp_(-0.025,0.025)
             nn.init.constant_(layer.bias.data, 0.0)
 
