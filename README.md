@@ -16,7 +16,28 @@ Phoneme classification project using Deep Learning
 # Download Timit dataset:
 wget https://data.deepai.org/timit.zip 
 
+# Scripts
 
+- build_timit.py
+
+    Takes location of TIMIT train and test directories as argument and creates train and test h5py files used for the training script.
+  
+ - train.py
+ 
+    Takes location of train and test h5py files and trains/tests multi-headed CNN for phoneme classification.
+  
+  - model.py
+  
+    Multi-Headed CNN class and helper functions.
+  
+  - prep_data.py
+  
+    Preprocessing steps for preparing train and test data for training PyTorch model.
+  
+  - visualize_data.py
+  
+    Plots examples of raw TIMIT data along with examples of the features used for training (MFCCs, MFCC Distances, MFCC Delta, MFCC Delta Delta).
+  
 ## License
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/mpc6/PhonemeID/blob/master/LICENSE.txt)
 This work is released under MIT license.
