@@ -10,8 +10,9 @@ import matplotlib.pyplot as plt
 import sounddevice as sd
 from math import ceil
 from confusion_matrix_pretty_print import plot_confusion_matrix_from_data
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, f1_score
 import pandas as pd
+from build_timit import TimitDictionary
 
 
 # From Phoneme Boundary Detection Using Learnable Segmental Features, Felix Kreuk et al.
@@ -133,7 +134,7 @@ def plot_loss(model_file, lr_reduce, lr_rates):
     plt.xlabel('epoch')
 
     for x, lr in zip(lr_reduce, lr_rates):
-        plt.axvline(x, linestyle='dashed', color='black', label=f'lr={lr}')
+        plt.axvline(int(x), linestyle='dashed', color='black', label=f'lr={lr}')
 
     best_epoch = epochs[np.argmin(np.array(data['val_loss']))]
     plt.axvline(best_epoch, linestyle='-.', color='green', label=f'best epoch={best_epoch}')
@@ -147,22 +148,35 @@ def main():
     start = time.time()
 
     #model_dir = 'models_LR_tst_63.64'
-    model_dir = 'models_PRF_64.14'
+    #model_dir = 'models_PRF_64.14'
+    model_dir = 'models_70.38'
 
     # for confusion matrix
     #pd.set_option("display.max_rows", 45, "display.max_columns", 45)
     pd.set_option('display.expand_frame_repr', False)
     results = pickle.load(open(os.path.join(model_dir, 'test_preds.npy'), 'rb'))
-    phn_dict = pickle.load(open('dict.npy','rb'))
-    labels = [x for x in range(45)]
+    #phn_dict = pickle.load(open('dict.npy','rb'))
+    timit_dict = pickle.load(open(os.path.join('data_fold', 'timit_dict.npy'), 'rb'))
+    phn_dict = []
+    for i in range(timit_dict.num_phonemes):
+        for key, value in timit_dict.phonemes_idx.items():
+            if value == i:
+                phn_dict.append(key)
+                break
+
+    labels = [x for x in range(timit_dict.num_phonemes)]
     cf = confusion_matrix(results['targets'], results['preds'], labels=labels)
     cf_df = pd.DataFrame(cf, index=phn_dict, columns=phn_dict)
     print(cf_df)
+    f1 = f1_score(results['targets'], results['preds'], average='weighted')
+    print(f'F1 = {f1}')
     #plot_confusion_matrix_from_data(results['targets'], results['preds'], fz=8, columns=labels)
 
     # for training curves
-    lr_reduce = [1, 30, 39]
-    lr_rates = [0.001, 0.0001, 0.00001]
+    with open(os.path.join(model_dir, 'lrs.txt')) as f:
+        lines = f.read().split()
+        lr_reduce = lines[0].split(',')
+        lr_rates = lines[1].split(',')
     model_training_file = os.path.join(model_dir, 'final_model.npy')
     plot_loss(model_training_file, lr_reduce, lr_rates)
 
