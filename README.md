@@ -1,6 +1,6 @@
 # PhonemeID
 ### by Merlin Carson
-Phoneme classification project using Deep Learning
+Phoneme classification project using a Multi-Headed Convolutional Neural Network.
 
 # Requirements
 * Pytorch (1.7.0)
