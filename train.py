@@ -24,8 +24,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Timit dataset builder')
     parser.add_argument('--timit_path', type=str, default='../timit/data',
                          help='location of Timit Train and Test directories')
-    parser.add_argument('--phoneme_dict', type=str, default='../timit/TIMITDIC.TXT',
-                         help='location of phoneme dictionary')
+    parser.add_argument('--timit_dict', type=str, default='timit_dict.npy',
+                         help='location of phoneme dictionary object')
     parser.add_argument('--data_dir', type=str, default='data', help='location to load .h5 datasets')
     parser.add_argument('--num_ffts', type=int, default=60, help='n_fft for feature extraction')
     parser.add_argument('--hop_length', type=int, default=160, help='hop_length for feature extraction')
@@ -34,15 +34,15 @@ def parse_args():
 
     parser.add_argument('--model_dir', type=str, default='models', help='location of model files')
     parser.add_argument('--seed', type=int, default=42, help='random seed')
-    parser.add_argument('--batch_size', type=int, default=16, help='batch size for training')
+    parser.add_argument('--batch_size', type=int, default=256, help='batch size for training')
     parser.add_argument('--epochs', type=int, default=1000, help='number of epochs')
     parser.add_argument('--patience', type=int, default=10, help='number of epochs of no improvment before early stopping')
-    parser.add_argument('--lr', type=float, default=0.01, help='learning rate')
+    parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
     parser.add_argument('--lr_decay', type=float, default=0.87, help='learning rate multiplicative decay per epoch')
     parser.add_argument('--dropout', type=float, default=0.6, help='dropout rate for each layer')
     parser.add_argument('--num_channels', type=int, default=1, help='number channels for features')
-    parser.add_argument('--num_filters', type=int, default=16, help='base number of filters for CNN layers')
-    parser.add_argument('--num_cnn_blocks', type=int, default=3, help='number of CNN layers for each CNN feature model')
+    parser.add_argument('--num_filters', type=int, default=256, help='base number of filters for CNN layers')
+    parser.add_argument('--num_cnn_blocks', type=int, default=5, help='number of CNN layers for each CNN feature model')
     parser.add_argument('--filter_size', type=int, default=3, help='CNN filters size')
     parser.add_argument('--kernel_size', type=int, default=3, help='CNN kernel size')
     parser.add_argument('--stride', type=int, default=1, help='CNN kernel stride')
@@ -76,25 +76,22 @@ def calc_cnn_outsize(features, args):
                     * (features['mfccs'].shape[2] - cnn_layer_deltas)) * args.num_filters
 
     if args.use_dists:
-        num_features += features['dists'].shape[1] * features['dists'].shape[2] * 32 
+        num_features += features['dists'].shape[1] * features['dists'].shape[2] * args.num_filters//8 
     if args.use_deltas:
         num_features += ((features['deltas'].shape[1] - cnn_layer_deltas) 
-                         * (features['deltas'].shape[2] - cnn_layer_deltas)) * 64 
+                         * (features['deltas'].shape[2] - cnn_layer_deltas)) * args.num_filters//4 
     if args.use_deltas2:
         num_features += ((features['deltas2'].shape[1] - cnn_layer_deltas)
-                    * (features['deltas2'].shape[2] - cnn_layer_deltas)) * 64 
+                    * (features['deltas2'].shape[2] - cnn_layer_deltas)) * args.num_filters//4 
 
-    #num_features = num_features * args.num_filters
     return num_features 
 
 # function to remove weight decay from output layer, or from PReLU
 def weight_decay(model, layer='pred_model.model.4'):
+    print('Disabling weight decay for output layer, batch normalization layers and PReLU activation layers')
     params = []
     for name, param in model.named_parameters():
-        print(name)
-        #if layer in name# or '.2' in name or '.6' in name or '.10' in name or '.14' in name or '18' in name:
         if layer in name or ('.0' not in name and '.4' not in name and '.8' not in name and '.12' not in name and '.16' not in name):
-            print(f'Setting weight decay of {name} to 0')
             params.append({'params': param, 'weight_decay': 0.})
         else:
             params.append({'params': param})
@@ -105,8 +102,8 @@ def main(args):
     start = time.time()
 
     # build timit dictionary from timit dictionary file
-    timit_dict = TimitDictionary(args.phoneme_dict)
-    print(f'Number of phonemes in dictionary: {timit_dict.nphonemes}')
+    timit_dict = pickle.load(open(os.path.join(args.data_dir, args.timit_dict), 'rb')) 
+    print(f'Number of phonemes in dictionary: {timit_dict.num_phonemes}')
 
     # create timit dataset object 
     timit_data = TimitDataLoader(args.timit_path, timit_dict, args.num_ffts, 
@@ -135,7 +132,7 @@ def main(args):
 
     train_dataset, val_dataset, test_dataset, train_stats = preprocess_data(timit_data.train_feats, timit_data.train_phns,
                                                                             timit_data.test_feats, timit_data.test_phns,
-                                                                            args, test_size=0.15)
+                                                                            args, test_size=0.05)
 
     print(f'Number of training examples: {len(train_dataset)}')
     print(f'Number of validation examples: {len(val_dataset)}')
@@ -148,7 +145,7 @@ def main(args):
 
     # create model
     args.num_features = calc_cnn_outsize(timit_data.train_feats, args)
-    args.num_phonemes = timit_dict.nphonemes
+    args.num_phonemes = timit_dict.num_phonemes
     model = MultiHeadCNN(args)
     print(model)
     print(f'total number of parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}')
@@ -159,10 +156,9 @@ def main(args):
 
     # setup loss and optimizer
     criterion = torch.nn.CrossEntropyLoss().to(device)
-    #criterion = torch.nn.NLLLoss().to(device)
-    #optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     params = weight_decay(model)
-    optimizer = torch.optim.AdamW(params, weight_decay=1e-2, amsgrad=True)
+    optimizer = torch.optim.AdamW(params, weight_decay=args.lr, amsgrad=True)
 
 
     # schedulers
@@ -234,7 +230,6 @@ def main(args):
 
         # reduce learning rate if validation has leveled off
         scheduler.step(epoch_val_loss)
-        #scheduler.step()
 
         # exponential decay of learning rate
         #scheduler.step()
