@@ -2,6 +2,8 @@
 ### by Merlin Carson
 Phoneme classification project using a Multi-Headed Convolutional Neural Network.
 
+[Project research paper in LaTeX](https://github.com/mpc6/PhonemeID/blob/main/PhonemeID_CNN.pdf)
+
 # Requirements
 * Pytorch (1.7.0)
 * Sklearn (0.22.1)
